@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Scene Boilerplate</title>
+    <style>
+        @font-face {
+            font-family: 'Conthrax';
+            /* Make sure you have a 'conthrax.ttf' (or .woff, .otf, etc.) font file in a 'fonts' directory */
+            src: url('fonts/conthrax.ttf') format('truetype');
+            /* 
+             * For best browser compatibility, provide multiple font formats.
+             * You will need to generate .woff and .woff2 files from your .ttf file.
+             */
+            src: url('fonts/conthrax.woff2') format('woff2'),
+                 url('fonts/conthrax.woff') format('woff'),
+                 url('fonts/conthrax.ttf') format('truetype');
+        }
+        body { margin: 0; font-family: 'Conthrax', sans-serif; background-color: #000; color: #fff; }
+        canvas { display: block; }
+        #ui-container {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            min-width: 120px;
+        }
+        #distance-counter {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border-radius: 3px;
+        }
+        #scale-indicator {
+            position: absolute;
+            bottom: 45px; /* Positioned above the distance counter */
+            left: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border-radius: 3px;
+        }
+        #auto-zoom-indicator {
+            position: absolute;
+            bottom: 45px; /* Positioned above the credits button */
+            right: 10px;
+            background: rgba(100, 200, 255, 0.7);
+            color: black;
+            padding: 5px 10px;
+            border-radius: 3px;
+            display: none; /* Hidden by default */
+            font-size: 12px;
+        }
+        #credits-button {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        #info-box {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 5px;
+            width: 250px;
+            display: none; /* Hidden by default */
+        }
+        #info-name {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #555;
+            padding-bottom: 5px;
+        }
+        #labels-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* So it doesn't interfere with mouse clicks on the canvas */
+            overflow: hidden;
+        }
+        .label {
+            position: absolute;
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 12px;
+            pointer-events: auto; /* Allow clicks on individual labels */
+            cursor: pointer;
+            /* The transform is now handled dynamically in JavaScript */
+        }
+        .ui-element {
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            border-radius: 3px;
+            padding: 4px;
+            font-family: 'Conthrax', sans-serif;
+            vertical-align: middle;
+        }
+        /* Remove default arrow for select in some browsers */
+        select.ui-element { -webkit-appearance: none; -moz-appearance: none; appearance: none; padding-right: 20px; background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>"); background-repeat: no-repeat; background-position-x: 100%; background-position-y: 50%; }
+
+        /* Credits Panel Styles */
+        #credits-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none; /* Initially hidden, controlled by JS */
+            justify-content: center;
+            align-items: center;
+            z-index: 200; /* Ensure it's on top of other UI */
+        }
+        #credits-content {
+            background: rgba(20, 20, 20, 0.9);
+            padding: 20px 40px;
+            border-radius: 10px;
+            border: 1px solid #555;
+            text-align: center;
+            color: white;
+        }
+        #credits-content h2 {
+            margin-top: 0;
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+        }
+        #credits-content p {
+            line-height: 1.5;
+            margin: 15px 0;
+        }
+        #close-credits-button { margin-top: 20px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <div>
+            <input type="checkbox" id="show-orbits-checkbox" checked>
+            <label for="show-orbits-checkbox">Show Orbits</label>
+        </div>
+        <div>
+            <input type="checkbox" id="show-labels-checkbox" checked>
+            <label for="show-labels-checkbox">Show Labels</label>
+        </div>
+        <div>
+            <input type="checkbox" id="show-asteroids-checkbox" checked>
+            <label for="show-asteroids-checkbox">Show Asteroid Belt</label>
+        </div>
+        <div>
+            <input type="checkbox" id="pause-animation-checkbox">
+            <label for="pause-animation-checkbox">Pause Animation</label>
+        </div>
+        <div style="margin-top: 10px;">
+            <label for="search-input" style="vertical-align: middle;">Search:</label>
+            <div id="search-wrapper" style="display: inline-block; position: relative; vertical-align: middle;">
+                <input type="text" id="search-input" class="ui-element" placeholder="E.g., Mars, Sirius" autocomplete="off">
+                <div id="suggestions-box" style="position: absolute; top: 100%; left: 0; right: 0; background: rgba(0,0,0,0.8); border: 1px solid #555; border-top: none; border-radius: 0 0 3px 3px; max-height: 200px; overflow-y: auto; display: none; z-index: 100;">
+                    <!-- Suggestions will be populated by JavaScript -->
+                </div>
+            </div>
+            <select id="filter-select" class="ui-element">
+                <option value="all">All Types</option>
+                <option value="star">Stars</option>
+                <option value="planet">Planets</option>
+                <option value="moon">Moons</option>
+            </select>
+            <style>
+                /* Style dropdown options to match the theme. Note: Browser support for this is limited. */
+                #filter-select option {
+                    background: #333;
+                }
+            </style>
+        </div>
+        <div style="margin-top: 10px;">
+            <label style="vertical-align: middle;">Speed: </label>
+            <button id="speed-down-btn" style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&larr;</button>
+            <span id="speed-display" style="display:inline-block; width: 80px; text-align:center; vertical-align: middle;">Normal</span>
+            <button id="speed-up-btn" style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&rarr;</button>
+        </div>
+    </div>
+
+    <div id="scale-indicator">Scale: System</div>
+
+    <div id="distance-counter">Distance: 0 km</div>
+
+    <div id="auto-zoom-indicator">Auto-Traveling...</div>
+
+    <div id="credits-button">Credits</div>
+
+    <div id="credits-panel">
+        <div id="credits-content">
+            <h2>Credits</h2>
+            <p><strong>Code</strong><br>Gemini AI, PokeJin</p>            
+            <p><strong>Prompt/Context Engineering</strong><br>PokeJin, ChatGPT</p>
+            <p><strong>Concept</strong><br>Mr1noobfatfish, PokeJin</p>            
+            <p><strong>Textures:</strong><br>SolarSystemScope<br>cubicApoc</p>
+            <button id="close-credits-button" class="ui-element">Close</button>
+        </div>
+    </div>
+
+
+    <div id="info-box">
+        <div id="info-name"></div>
+        <div id="info-details"></div>
+    </div>
+
+    <div id="labels-container"></div>
+
+    <!-- The main script will create and append the canvas here -->
+    <script type="module" src="scene-boilerplate.js"></script>
+</body>
+</html>
