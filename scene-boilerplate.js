@@ -77,29 +77,6 @@ scene.add(sunLight);
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.05); // Reduced for more dramatic shadows
 scene.add(ambientLight);
 
-const loader = new THREE.TextureLoader();
-const planetTextures = {
-  sun: loader.load('textures/stars/2k_sun.png'),
-  sun_blue: loader.load('textures/stars/2k_sun_blue.png'),
-  sun_orange: loader.load('textures/stars/2k_sun_orange.png'),
-  sun_red: loader.load('textures/stars/2k_sun_red.png'),
-  mercury: loader.load('textures/planets/2k_mercury.jpg'),
-  venusSurface: loader.load('textures/planets/2k_venus_surface.jpg'),
-  venusAtmos: loader.load('textures/planets/2k_venus_atmosphere.jpg'),
-  earth: loader.load('textures/planets/2k_earth.jpg'),
-  mars: loader.load('textures/planets/2k_mars.jpg'),
-  jupiter: loader.load('textures/planets/2k_jupiter.jpg'),
-  saturn: loader.load('textures/planets/2k_saturn.jpg'),
-  uranus: loader.load('textures/planets/2k_uranus.jpg'),
-  moon: loader.load('textures/moons/2k_moon.jpg'),
-  neptune: loader.load('textures/planets/2k_neptune.jpg'),
-  saturnRing: loader.load('textures/planets/2k_saturn_ring_alpha.png'),
-  flare0: loader.load("textures/lensflare/stellar_starview.png"),
-  flare3: loader.load("textures/lensflare/stellar_starview.png"),
-  star: loader.load('textures/lensflare/stellar_starview.png'), // Reverted to use the stylized star view texture
-  star_blue: loader.load('textures/lensflare/stellar_starview_blue.png'), // Texture for blue stars
-  galaxy: loader.load('textures/galaxy.png') // Texture for the galactic view
-};
 
 // --- Global Scene Object Arrays ---
 const planets = [];
@@ -109,40 +86,19 @@ const labels = [];
 const systemLabels = {}; // For multi-star system labels
 const starMeshes = []; // For system-scale star meshes
 const starLights = []; // For system-scale star lights
+const starSystems = {}; // To hold system data like center position
+let galaxyPointClouds = {}; // To hold the new 3D galaxy point clouds
 const stellarObjects = []; // For nearby stars. Each element is { mesh, label, system }
 let intersectableObjects = []; // Will be dynamically populated in the animation loop
+let asteroidBelt; // To hold the asteroid belt group for animation
+let galaxy;
+let galaxyLabeled;
+const pinnedObjects = new Set(); // To store the names of pinned objects
 const searchableObjects = []; // Unified list for the search functionality
 
-// Sun Mesh (emissive, not affected by scene lights)
-const sun = new THREE.Mesh(
-  new THREE.SphereGeometry(1, 64, 64),
-  new THREE.MeshBasicMaterial({ map: planetTextures.sun, transparent: true, depthWrite: false })
-);
-sun.name = 'Sol'; // Assign a name for raycasting and UI
-scene.add(sun);
-
-// Create a sprite for Sol to be visible at interstellar distances, and add it to stellarObjects.
-const solSpriteMaterial = new THREE.SpriteMaterial({
-    map: planetTextures.star,
-    color: 0xFFF4D5, // G2V star color
-    blending: THREE.AdditiveBlending,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false // Prevent sprite from blocking other transparent objects
-});
-const solSprite = new THREE.Sprite(solSpriteMaterial);
-solSprite.position.set(0, 0, 0);
-solSprite.scale.set(50000 * 10, 50000 * 10, 1.0); // Similar to other G-type stars, scaled up
-solSprite.name = 'Sol'; // Use 'Sol' to match focusing logic
-scene.add(solSprite);
-
-// Create a dedicated interstellar label for Sol's sprite
-const solInterstellarLabel = createLabel('Sol', solSprite);
-labels.push(solInterstellarLabel);
-
-// Add Sol's sprite and its new interstellar label to the list of stellar objects.
-stellarObjects.push({ mesh: solSprite, label: solInterstellarLabel, system: 'Sol' });
-
+// --- Texture Loading ---
+let planetTextures = {};
+let miscTextures = {};
 
 // Lens Flare
 const lensflare = new Lensflare();
@@ -164,41 +120,41 @@ const lensflare = new Lensflare();
 
 // --- Planet Data & Creation ---
 const planetData = [
-  {name:'Mercury', radius:0.38, distance: 35 * 0.39, eccentricity: 0.205, inclination: 7.00, lan: 48.3, axialTilt: 0.03, orbitSpeed:0.04, rotationSpeed:0.02, texture:'mercury'},
-  {name:'Venus',   radius:0.95, distance: 35 * 0.72, eccentricity: 0.007, inclination: 3.39, lan: 76.7, axialTilt: 177.3, orbitSpeed:0.015, rotationSpeed:0.01, texture:'venus'},
-  {name:'Earth',   radius:1,    distance: 35 * 1.00, eccentricity: 0.017, inclination: 0.00, lan: -11.2, axialTilt: 23.4, orbitSpeed:0.01, rotationSpeed:0.02, texture:'earth', moons: [
-    { name: 'Luna', radius: 0.27, distance: 2.5, eccentricity: 0.054, inclination: 5.1, lan: 0, axialTilt: 6.7, orbitSpeed: 0.1, rotationSpeed: 0.01, texture: 'moon' }
+  {star: 'Sol', name:'Mercury', class: 'Terrestrial Planet', radius:0.38, distance: 35 * 0.39, eccentricity: 0.205, inclination: 7.00, lan: 48.3, axialTilt: 0.03, orbitSpeed:0.04, rotationSpeed:0.02, texture:'mercury', albedo: 0.14, parentStar: 'Sol'},
+  {star: 'Sol', name:'Venus',   class: 'Terrestrial Planet', radius:0.95, distance: 35 * 0.72, eccentricity: 0.007, inclination: 3.39, lan: 76.7, axialTilt: 177.3, orbitSpeed:0.015, rotationSpeed:0.01, texture:'venus', albedo: 0.75, parentStar: 'Sol'},
+  {star: 'Sol', name:'Earth',   class: 'Habitable World', radius:1,    distance: 35 * 1.00, eccentricity: 0.017, inclination: 0.00, lan: -11.2, axialTilt: 23.4, orbitSpeed:0.01, rotationSpeed:0.02, texture:'earth', albedo: 0.31, parentStar: 'Sol', moons: [
+    { star: 'Sol', name: 'Luna', class: 'Rocky Moon', radius: 0.27, distance: 2.5, eccentricity: 0.054, inclination: 5.1, lan: 0, axialTilt: 6.7, orbitSpeed: 0.1, rotationSpeed: 0.01, texture: 'moon', albedo: 0.11, parentStar: 'Earth', system: 'Sol' }
   ]},
-  {name:'Mars',    radius:0.53, distance: 35 * 1.52, eccentricity: 0.094, inclination: 1.85, lan: 49.6, axialTilt: 25.2, orbitSpeed:0.008, rotationSpeed:0.018, texture:'mars'},
-  {name:'Jupiter', radius:8.5,  distance: 35 * 5.20, eccentricity: 0.049, inclination: 1.31, lan: 100.5, axialTilt: 3.1, orbitSpeed:0.005, rotationSpeed:0.04, texture:'jupiter', moons: [
-    { name: 'Io', radius: 0.28, distance: 12, eccentricity: 0.004, inclination: 0.05, lan: 0, axialTilt: 0, orbitSpeed: 0.4, rotationSpeed: 0.1, texture: 'moon' },
-    { name: 'Europa', radius: 0.24, distance: 15, eccentricity: 0.009, inclination: 0.47, lan: 0, axialTilt: 0, orbitSpeed: 0.3, rotationSpeed: 0.08, texture: 'moon' },
-    { name: 'Ganymede', radius: 0.41, distance: 19, eccentricity: 0.001, inclination: 0.20, lan: 0, axialTilt: 0, orbitSpeed: 0.2, rotationSpeed: 0.05, texture: 'moon' },
-    { name: 'Callisto', radius: 0.38, distance: 24, eccentricity: 0.007, inclination: 0.20, lan: 0, axialTilt: 0, orbitSpeed: 0.1, rotationSpeed: 0.03, texture: 'moon' }
+  {star: 'Sol', name:'Mars',    class: 'Terrestrial Planet', radius:0.53, distance: 35 * 1.52, eccentricity: 0.094, inclination: 1.85, lan: 49.6, axialTilt: 25.2, orbitSpeed:0.008, rotationSpeed:0.018, texture:'mars', albedo: 0.25, parentStar: 'Sol'},
+  {star: 'Sol', name:'Jupiter', class: 'Gas Giant', radius:8.5,  distance: 35 * 5.20, eccentricity: 0.049, inclination: 1.31, lan: 100.5, axialTilt: 3.1, orbitSpeed:0.005, rotationSpeed:0.04, texture:'jupiter', albedo: 0.54, parentStar: 'Sol', moons: [
+    { star: 'Sol', name: 'Io', class: 'Volcanic Moon', radius: 0.28, distance: 12, eccentricity: 0.004, inclination: 0.05, lan: 0, axialTilt: 0, orbitSpeed: 0.4, rotationSpeed: 0.1, texture: 'moon', albedo: 0.63, parentStar: 'Jupiter', system: 'Sol' },
+    { star: 'Sol', name: 'Europa', class: 'Ice Moon', radius: 0.24, distance: 15, eccentricity: 0.009, inclination: 0.47, lan: 0, axialTilt: 0, orbitSpeed: 0.3, rotationSpeed: 0.08, texture: 'moon', albedo: 0.67, parentStar: 'Jupiter', system: 'Sol' },
+    { star: 'Sol', name: 'Ganymede', class: 'Icy Moon', radius: 0.41, distance: 19, eccentricity: 0.001, inclination: 0.20, lan: 0, axialTilt: 0, orbitSpeed: 0.2, rotationSpeed: 0.05, texture: 'moon', albedo: 0.43, parentStar: 'Jupiter', system: 'Sol' },
+    { star: 'Sol', name: 'Callisto', class: 'Rocky Moon', radius: 0.38, distance: 24, eccentricity: 0.007, inclination: 0.20, lan: 0, axialTilt: 0, orbitSpeed: 0.1, rotationSpeed: 0.03, texture: 'moon', albedo: 0.17, parentStar: 'Jupiter', system: 'Sol' }
   ]},
-  {name:'Saturn',  radius:7.5,  distance: 35 * 9.58, eccentricity: 0.057, inclination: 2.49, lan: 113.7, axialTilt: 26.7, orbitSpeed:0.003, rotationSpeed:0.038, texture:'saturn', ring:true},
-  {name:'Uranus',  radius:3.5,  distance: 35 * 19.22, eccentricity: 0.046, inclination: 0.77, lan: 74.0, axialTilt: 97.8, orbitSpeed:0.002, rotationSpeed:0.03, texture:'uranus'},
-  {name:'Neptune', radius:3.3,  distance: 35 * 30.05, eccentricity: 0.011, inclination: 1.77, lan: 131.8, axialTilt: 28.3, orbitSpeed:0.0015, rotationSpeed:0.03, texture:'neptune'}
+  {star: 'Sol', name:'Saturn',  class: 'Gas Giant', radius:7.5,  distance: 35 * 9.58, eccentricity: 0.057, inclination: 2.49, lan: 113.7, axialTilt: 26.7, orbitSpeed:0.003, rotationSpeed:0.038, texture:'saturn', albedo: 0.34, ring:true, parentStar: 'Sol'},
+  {star: 'Sol', name:'Uranus',  class: 'Ice Giant', radius:3.5,  distance: 35 * 19.22, eccentricity: 0.046, inclination: 0.77, lan: 74.0, axialTilt: 97.8, orbitSpeed:0.002, rotationSpeed:0.03, texture:'uranus', albedo: 0.30, parentStar: 'Sol'},
+  {star: 'Sol', name:'Neptune', class: 'Ice Giant', radius:3.3,  distance: 35 * 30.05, eccentricity: 0.011, inclination: 1.77, lan: 131.8, axialTilt: 28.3, orbitSpeed:0.0015, rotationSpeed:0.03, texture:'neptune', albedo: 0.29, parentStar: 'Sol'}
 ];
 
 // Fictional exoplanet for Barnard's Star. Using existing textures as placeholders.
 const exoplanetData = [
     // Data based on real, confirmed exoplanets. Distances are in AU.
     // Proxima Centauri System
-    { star: "Proxima Centauri", name: "Proxima Centauri d", radius: 0.81, distance: 35 * 0.02885, eccentricity: 0.04, inclination: 133, lan: 149, axialTilt: 10.0, orbitSpeed: 0.25, rotationSpeed: 0.03, texture: 'mercury' },
-    { star: "Proxima Centauri", name: "Proxima Centauri b", radius: 1.07, distance: 35 * 0.04857, eccentricity: 0.0, inclination: 133, lan: 149, axialTilt: 10.0, orbitSpeed: 0.18, rotationSpeed: 0.02, texture: 'mars' }, // In habitable zone
+    { star: "Alpha Centauri", name: "Proxima Centauri d", class: 'Hot Super-Earth', radius: 0.81, distance: 35 * 0.02885, eccentricity: 0.04, inclination: 133, lan: 149, axialTilt: 10.0, orbitSpeed: 0.25, rotationSpeed: 0.03, texture: 'mercury', albedo: 0.15, parentStar: 'Proxima Centauri' },
+    { star: "Alpha Centauri", name: "Proxima Centauri b", class: 'Habitable Super-Earth', radius: 1.07, distance: 35 * 0.04857, eccentricity: 0.0, inclination: 133, lan: 149, axialTilt: 10.0, orbitSpeed: 0.18, rotationSpeed: 0.02, texture: 'mars', albedo: 0.20, parentStar: 'Proxima Centauri' }, // In habitable zone
     
     // Barnard's Star System
-    { star: "Barnard's Star", name: "Barnard's Star b", radius: 1.3, distance: 35 * 0.404, eccentricity: 0.32, inclination: 90, lan: 120, axialTilt: 10.0, orbitSpeed: 0.02, rotationSpeed: 0.03, texture: 'uranus' }, // A cold super-Earth
+    { star: "Barnard's Star", name: "Barnard's Star b", class: 'Cold Super-Earth', radius: 1.3, distance: 35 * 0.404, eccentricity: 0.32, inclination: 90, lan: 120, axialTilt: 10.0, orbitSpeed: 0.02, rotationSpeed: 0.03, texture: 'uranus', albedo: 0.30, parentStar: "Barnard's Star" }, // A cold super-Earth
 
     // Epsilon Eridani System
-    { star: "Epsilon Eridani", name: "Epsilon Eridani b", radius: 8.0, distance: 35 * 3.48, eccentricity: 0.07, inclination: 34, lan: 11, axialTilt: 5.0, orbitSpeed: 0.006, rotationSpeed: 0.04, texture: 'jupiter' },
+    { star: "Epsilon Eridani", name: "Epsilon Eridani b", class: 'Gas Giant', radius: 8.0, distance: 35 * 3.48, eccentricity: 0.07, inclination: 34, lan: 11, axialTilt: 5.0, orbitSpeed: 0.006, rotationSpeed: 0.04, texture: 'jupiter', albedo: 0.50, parentStar: "Epsilon Eridani" },
 
     // Tau Ceti System
-    { star: "Tau Ceti", name: "Tau Ceti g", radius: 1.1, distance: 35 * 0.133, eccentricity: 0.08, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.1, rotationSpeed: 0.02, texture: 'venusSurface' },
-    { star: "Tau Ceti", name: "Tau Ceti h", radius: 1.1, distance: 35 * 0.243, eccentricity: 0.08, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.07, rotationSpeed: 0.02, texture: 'earth' },
-    { star: "Tau Ceti", name: "Tau Ceti e", radius: 1.5, distance: 35 * 0.538, eccentricity: 0.18, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.04, rotationSpeed: 0.03, texture: 'mars' }, // In habitable zone
-    { star: "Tau Ceti", name: "Tau Ceti f", radius: 1.5, distance: 35 * 1.334, eccentricity: 0.16, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.02, rotationSpeed: 0.03, texture: 'neptune' }, // In habitable zone
+    { star: "Tau Ceti", name: "Tau Ceti g", class: 'Hot Super-Earth', radius: 1.1, distance: 35 * 0.133, eccentricity: 0.08, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.1, rotationSpeed: 0.02, texture: 'venusSurface', albedo: 0.70, parentStar: "Tau Ceti" },
+    { star: "Tau Ceti", name: "Tau Ceti h", class: 'Warm Super-Earth', radius: 1.1, distance: 35 * 0.243, eccentricity: 0.08, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.07, rotationSpeed: 0.02, texture: 'earth', albedo: 0.35, parentStar: "Tau Ceti" },
+    { star: "Tau Ceti", name: "Tau Ceti e", class: 'Habitable Super-Earth', radius: 1.5, distance: 35 * 0.538, eccentricity: 0.18, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.04, rotationSpeed: 0.03, texture: 'mars', albedo: 0.25, parentStar: "Tau Ceti" }, // In habitable zone
+    { star: "Tau Ceti", name: "Tau Ceti f", class: 'Cold Super-Earth', radius: 1.5, distance: 35 * 1.334, eccentricity: 0.16, inclination: 35, lan: 188, axialTilt: 15.0, orbitSpeed: 0.02, rotationSpeed: 0.03, texture: 'neptune', albedo: 0.30, parentStar: "Tau Ceti" }, // In habitable zone
 ];
 
 // --- Interstellar Objects Data ---
@@ -206,12 +162,17 @@ const sceneUnitsPerAU = 35;
 const auPerLy = 63241.1;
 const sceneUnitsPerLy = sceneUnitsPerAU * auPerLy;
 
+// Define Sol's position in the galaxy: ~27,000 light-years from the center.
+// We'll place it along the positive Z-axis for this implementation.
+const solGalacticPosition = new THREE.Vector3(0, 0, 27000 * sceneUnitsPerLy);
+
 // Database of nearby stars
 const starDatabase = [
-    { system: "Alpha Centauri", name: "Alpha Centauri A", class: "G2V", radius: 1.22, dist: 4.37, ra: "14h 39m 36s", dec: "-60° 50' 02\"", color: 0xFFF4D5, scale: 55000 }, // G-type -> sun
-    { system: "Alpha Centauri", name: "Alpha Centauri B", class: "K1V", radius: 0.86, dist: 4.37, ra: "14h 39m 35s", dec: "-60° 50' 12\"", color: 0xFFD580, scale: 45000 }, // K-type -> orange
+    { system: "Alpha Centauri", name: "Alpha Centauri A", class: "G2V", radius: 1.22, dist: 4.37, ra: "14h 39m 36s", dec: "-60° 50' 02\"", color: 0xFFF4D5, scale: 48000 }, // G-type -> sun. Sprite scale reduced.
+    { system: "Alpha Centauri", name: "Alpha Centauri B", class: "K1V", radius: 0.86, dist: 4.37, ra: "14h 39m 35s", dec: "-60° 50' 12\"", color: 0xFFD580, scale: 38000 }, // K-type -> orange. Sprite scale reduced.
     { system: "Alpha Centauri", name: "Proxima Centauri", class: "M5.5Ve", radius: 0.15, dist: 4.24, ra: "14h 29m 42s", dec: "-62° 40' 46\"", color: 0xFF8C61, scale: 15000 }, // M-type -> red
-    { system: "Sirius", name: "Sirius", class: "A1V", radius: 1.71, dist: 8.6, ra: "06h 45m 08s", dec: "-16° 42' 58\"", color: 0xffffff, scale: 85000 }, // A-type -> blue
+    { system: "Sirius", name: "Sirius A", class: "A1V", radius: 1.71, dist: 8.6, ra: "06h 45m 08s", dec: "-16° 42' 58\"", color: 0xcad7ff, scale: 65000 }, // A-type -> blue-white
+    { system: "Sirius", name: "Sirius B", class: "DA2", radius: 0.008, dist: 8.6, ra: "06h 45m 08s", dec: "-16° 42' 58\"", color: 0xffffff, scale: 1000, isCompanion: true, companionDist: 30 }, // White Dwarf companion
     { system: "Barnard's Star", name: "Barnard's Star", class: "M4.0V", radius: 0.19, dist: 5.96, ra: "17h 57m 48s", dec: "+04° 41' 36\"", color: 0xFF9E6D, scale: 20000 }, // M-type -> red
     { system: "Wolf 359", name: "Wolf 359", class: "M6.5V", radius: 0.16, dist: 7.9, ra: "10h 56m 28s", dec: "+07° 00' 52\"", color: 0xC75A3A, scale: 16000 }, // M-type -> red
     { system: "Lalande 21185", name: "Lalande 21185", class: "M2.0V", radius: 0.39, dist: 8.31, ra: "11h 03m 20s", dec: "+35° 58' 11\"", color: 0xFFAD60, scale: 38000 }, // M-type -> red
@@ -219,15 +180,15 @@ const starDatabase = [
     { system: "Epsilon Eridani", name: "Epsilon Eridani", class: "K2V", radius: 0.73, dist: 10.5, ra: "03h 32m 55s", dec: "-09° 27' 29\"", color: 0xFFD580, scale: 42000 }, // K-type -> orange
     { system: "Tau Ceti", name: "Tau Ceti", class: "G8.5V", radius: 0.79, dist: 11.9, ra: "01h 44m 04s", dec: "-15° 56' 14\"", color: 0xFFF0C9, scale: 48000 }, // G-type -> sun
 ];
-const starSystems = {}; // To hold system data like center position
 
 // A scaling factor to make planets proportionally smaller than stars.
 const planetScaleFactor = 0.1;
 
 function createMoon(moonData, planetGroup) {
+    const albedoColor = new THREE.Color().setScalar(moonData.albedo || 0.5);
     const moonMesh = new THREE.Mesh(
         new THREE.SphereGeometry(moonData.radius * planetScaleFactor, 16, 16),
-        new THREE.MeshStandardMaterial({ map: planetTextures[moonData.texture], roughness: 0.7, transparent: true, opacity: 0 })
+        new THREE.MeshStandardMaterial({ map: planetTextures[moonData.texture], roughness: 0.7, transparent: true, opacity: 0, color: albedoColor })
     );
     moonMesh.name = moonData.name;
     moonMesh.material.depthWrite = false; // Prevents rendering artifacts with other transparent objects
@@ -264,18 +225,19 @@ function createMoon(moonData, planetGroup) {
 }
 
 function createCelestialObject(data) {
-    const planetGroup = new THREE.Group();
+    const planetGroup = new THREE.Group(); // This group will handle the planet's orbital position.
     planetGroup.name = data.name;
 
+    const albedoColor = new THREE.Color().setScalar(data.albedo || 0.5);
     let surfaceMesh;
 
     if (data.name === 'Venus') {
         surfaceMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(data.radius * planetScaleFactor, 32, 32),
-            new THREE.MeshStandardMaterial({ map: planetTextures.venusSurface, roughness: 0.5, metalness: 0.1 })
+            new THREE.SphereGeometry(data.radius * planetScaleFactor, 32, 32), // The actual planet mesh
+            new THREE.MeshStandardMaterial({ map: planetTextures.venusSurface, roughness: 0.5, metalness: 0.1, color: albedoColor })
         );
         const atmosMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(data.radius * planetScaleFactor * 1.02, 32, 32),
+            new THREE.SphereGeometry(data.radius * planetScaleFactor * 1.02, 32, 32), // The atmosphere mesh
             new THREE.MeshStandardMaterial({
                 map: planetTextures.venusAtmos,
                 transparent: true,
@@ -287,15 +249,15 @@ function createCelestialObject(data) {
         surfaceMesh.add(atmosMesh);
     } else {
         surfaceMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(data.radius * planetScaleFactor, 32, 32),
-            new THREE.MeshStandardMaterial({ map: planetTextures[data.texture], roughness: 0.5, metalness: 0.1 })
+            new THREE.SphereGeometry(data.radius * planetScaleFactor, 32, 32), // The actual planet mesh
+            new THREE.MeshStandardMaterial({ map: planetTextures[data.texture], roughness: 0.5, metalness: 0.1, color: albedoColor })
         );
     }
-    planetGroup.add(surfaceMesh);
+    planetGroup.add(surfaceMesh); // Add the planet mesh to the main group.
 
     // Enable shadow casting and receiving for the main planet mesh
     // We traverse because for Venus, the surface is a child of the group.
-    surfaceMesh.traverse(child => {
+    planetGroup.traverse(child => {
         if (child.isMesh) {
             child.castShadow = false;
             child.receiveShadow = false;
@@ -325,7 +287,7 @@ function createCelestialObject(data) {
         const ringMesh = new THREE.Mesh(ringGeo, ringMat);
         // Rings should receive shadows from the planet, but not cast them (for performance)
         ringMesh.receiveShadow = false;
-        planetGroup.add(ringMesh);
+        surfaceMesh.add(ringMesh); // Add the ring to the rotating surface mesh, not the main group.
     }
 
     if (data.moons) {
@@ -337,7 +299,7 @@ function createCelestialObject(data) {
         });
     }
 
-    planetGroup.rotation.z = THREE.MathUtils.degToRad(data.axialTilt);
+    surfaceMesh.rotation.z = THREE.MathUtils.degToRad(data.axialTilt); // Apply axial tilt only to the surface mesh.
     return planetGroup;
 }
 
@@ -387,7 +349,7 @@ function createOrbit(a, e, i, lan) {
     const material = new THREE.LineBasicMaterial({
         color: 0x99ffff,
         transparent: true,
-        opacity: 0.5,
+        opacity: 1.0, // Increased brightness
         depthWrite: false // Prevents the far side of the orbit from being culled
     });
     const ellipse = new THREE.Line(geometry, material);
@@ -401,6 +363,183 @@ function createOrbit(a, e, i, lan) {
     ellipse.renderOrder = 1;
     return ellipse;
 }
+
+/**
+ * A comprehensive function to create an entire star system from a data object.
+ * It handles the creation of stars, planets, moons, orbits, and labels.
+ * @param {object} systemData - An object containing the definition for the star system.
+ */
+function createStarSystem(systemData) {
+    const systemName = systemData.name;
+    const systemCenter = new THREE.Vector3();
+    const starObjectsInSystem = [];
+
+    // 1. Create the star(s) for the system
+    systemData.stars.forEach(starData => {
+        const starPosition = new THREE.Vector3();
+        if (starData.ra && starData.dec && starData.dist > 0) {
+            // Convert astronomical coordinates to Cartesian for interstellar stars
+            const raParts = starData.ra.match(/(\d+)h (\d+)m (\d+)s/);
+            const ra = (parseInt(raParts[1]) + parseInt(raParts[2])/60 + parseInt(raParts[3])/3600) * (15 * Math.PI/180);
+            const decParts = starData.dec.match(/([+-])(\d+)° (\d+)' (\d+)"/);
+            const decSign = decParts[1] === '-' ? -1 : 1;
+            const dec = (parseInt(decParts[2]) + parseInt(decParts[3])/60 + parseInt(decParts[4])/3600) * (Math.PI/180) * decSign;
+            const dist = starData.dist * sceneUnitsPerLy;
+            starPosition.set(
+                dist * Math.cos(dec) * Math.cos(ra),
+                dist * Math.sin(dec),
+                dist * Math.sin(ra)
+            );
+        }
+
+        // If this star is a companion, offset its position from the system's primary star.
+        // This is a simplified representation; a full orbital simulation would be more complex.
+        if (starData.isCompanion) {
+            starPosition.x += starData.companionDist || 20; // Default distance if not specified
+        }
+
+        // --- Create the system-scale star mesh (the large sphere) ---
+        const spectralType = starData.class.charAt(0).toUpperCase();
+        let systemStarTexture = planetTextures.sun;
+        // Use specific textures for different star types
+        if (starData.name === 'Sirius A') systemStarTexture = planetTextures.sun_blue;
+        else if (starData.name === 'Sirius B') systemStarTexture = planetTextures.sun_white;
+        else if (spectralType === 'A' || spectralType === 'B') systemStarTexture = planetTextures.sun_blue;
+        else if (spectralType === 'K') systemStarTexture = planetTextures.sun_orange;
+        else if (spectralType === 'M') systemStarTexture = planetTextures.sun_red;
+
+        const starMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(starData.radius, 64, 64),
+            new THREE.MeshBasicMaterial({ map: systemStarTexture, transparent: true, opacity: 0, depthWrite: false })
+        );
+        starMesh.position.copy(starPosition);
+        starMesh.name = starData.name;
+        scene.add(starMesh);
+        const starMeshLabel = createLabel(starData.name, starMesh);
+        labels.push(starMeshLabel);
+        starMesh.label = starMeshLabel; // Attach label directly to the mesh object
+        starMeshes.push(starMesh);
+
+        // --- Create the interstellar star sprite ---
+        let starSpriteTexture = planetTextures.star;
+        // Use a blue texture for hot stars like A, B, and white dwarfs (D)
+        if (starData.name === 'Sirius B') starSpriteTexture = planetTextures.sun_white;
+        else if (spectralType === 'D') starSpriteTexture = planetTextures.sun_white; 
+        else if (spectralType === 'A' || spectralType === 'B') starSpriteTexture = planetTextures.star_blue;
+
+
+        const spriteMaterial = new THREE.SpriteMaterial({
+            map: starSpriteTexture,
+            color: starData.color,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false
+        });
+        const starSprite = new THREE.Sprite(spriteMaterial);
+        starSprite.position.copy(starPosition);
+        starSprite.scale.set(starData.scale * 10, starData.scale * 10, 1.0);
+        starSprite.name = starData.name;
+        scene.add(starSprite);
+        const starSpriteLabel = createLabel(starData.name, starSprite);
+        labels.push(starSpriteLabel);
+        stellarObjects.push({ mesh: starSprite, label: starSpriteLabel, system: systemName });
+
+        // --- Create the light source for the star ---
+        const starLight = new THREE.PointLight(starData.color, 1.0);
+        const basePower = 4 * Math.PI * 100000;
+        starLight.power = basePower * (starData.radius ** 2);
+        starLight.name = starData.name; // Assign name to the light for easier lookup
+        starLight.decay = 2;
+        starLight.position.copy(starPosition);
+        starLight.visible = false;
+        scene.add(starLight);
+        starLights.push(starLight);
+
+        // --- Add to searchable objects and system tracking ---
+        searchableObjects.push({ name: starData.name, type: 'star', object: starSprite });
+        starObjectsInSystem.push(starSprite);
+        systemCenter.add(starPosition);
+    });
+
+    // Finalize system registration
+    systemCenter.divideScalar(systemData.stars.length);
+    starSystems[systemName] = { stars: starObjectsInSystem, center: systemCenter };
+    if (systemData.stars.length > 1) {
+        createSystemLabel(systemName, systemCenter);
+    }
+
+    // 2. Create the planets for the system
+    if (systemData.planets) {
+        systemData.planets.forEach(planetData => {
+            const planetObject = createCelestialObject(planetData);
+            scene.add(planetObject);
+
+            const orbitRing = createOrbit(planetData.distance, planetData.eccentricity, THREE.MathUtils.degToRad(planetData.inclination), THREE.MathUtils.degToRad(planetData.lan));
+            scene.add(orbitRing);
+            // Store the UUID to link the ring to the planet later
+            planetObject.orbitRingUUID = orbitRing.uuid;
+            orbitRings.push({
+                ring: orbitRing,
+                starName: systemName, // Associate orbit with its star system
+                parentStar: planetData.parentStar
+            });
+
+            // If this is our special ghost object, make its mesh invisible and skip UI creation.
+            if (planetData.name !== 'Mercury Ghost') {
+                labels.push(createLabel(planetData.name, planetObject));
+                searchableObjects.push({ name: planetData.name, type: 'planet', object: planetObject });
+            } else {
+                planetObject.visible = false; // Make the planet mesh invisible
+            }
+
+
+            planets.push({
+                starName: systemName,
+                parentStar: planetData.parentStar,
+                planet: planetObject,
+                a: planetData.distance,
+                e: planetData.eccentricity,
+                i: THREE.MathUtils.degToRad(planetData.inclination),
+                lan: THREE.MathUtils.degToRad(planetData.lan),
+                orbitSpeed: planetData.orbitSpeed,
+                rotationSpeed: planetData.rotationSpeed,
+                theta: Math.random() * 2 * Math.PI,
+                orbitRing: orbitRing // Keep this for now for compatibility, but UUID is better
+            });
+        });
+    }
+}
+
+// --- System Definitions ---
+
+const solSystemData = {
+    name: 'Sol',
+    stars: [ // Note: dist, ra, dec are ignored for Sol; its position is handled specially.
+        { name: 'Sol', class: 'G2V', radius: 1.0, dist: 0, color: 0xFFF4D5, scale: 50000 }
+    ],
+    planets: [
+        { star: 'Sol', name:'Mercury', class: 'Barren World', radius:0.38, distance: 35 * 0.39, eccentricity: 0.205, inclination: 7.00, lan: 48.3, axialTilt: 0.03, orbitSpeed:0.04, rotationSpeed:0.02, texture:'mercury', albedo: 0.14, parentStar: 'Sol'},
+        { star: 'Sol', name:'Mercury Ghost', class: 'Barren World', radius:0.38, distance: 35 * 0.39, eccentricity: 0.205, inclination: 7.00, lan: 48.3, axialTilt: 0.03, orbitSpeed:0.04, rotationSpeed:0.02, texture:'mercury', albedo: 0.14, parentStar: 'Sol'},
+        { star: 'Sol', name:'Venus',   class: 'Hothouse World', radius:0.95, distance: 35 * 0.72, eccentricity: 0.007, inclination: 3.39, lan: 76.7, axialTilt: 177.3, orbitSpeed:0.015, rotationSpeed:0.01, texture:'venus', albedo: 0.75, parentStar: 'Sol'},
+        { star: 'Sol', name:'Earth',   class: 'Continental World', radius:1,    distance: 35 * 1.00, eccentricity: 0.017, inclination: 0.00, lan: -11.2, axialTilt: 23.4, orbitSpeed:0.01, rotationSpeed:0.02, texture:'earth', albedo: 0.31, parentStar: 'Sol', moons: [
+            { star: 'Sol', system: 'Sol', name: 'Luna', radius: 0.27, distance: 2.5, eccentricity: 0.054, inclination: 5.1, lan: 0, axialTilt: 6.7, orbitSpeed: 0.1, rotationSpeed: 0.01, texture: 'moon', albedo: 0.11, parentStar: 'Earth' }
+        ]},
+        { star: 'Sol', name:'Mars',    class: 'Desert World', radius:0.53, distance: 35 * 1.52, eccentricity: 0.094, inclination: 1.85, lan: 49.6, axialTilt: 25.2, orbitSpeed:0.008, rotationSpeed:0.018, texture:'mars', albedo: 0.25, parentStar: 'Sol'},
+        { star: 'Sol', name:'Jupiter', class: 'Gas Giant', radius:8.5,  distance: 35 * 5.20, eccentricity: 0.049, inclination: 1.31, lan: 100.5, axialTilt: 3.1, orbitSpeed:0.005, rotationSpeed:0.04, texture:'jupiter', albedo: 0.54, parentStar: 'Sol', moons: [
+            { star: 'Sol', system: 'Sol', name: 'Io', class: 'Volcanic Moon', radius: 0.28, distance: 12, eccentricity: 0.004, inclination: 0.05, lan: 0, axialTilt: 0, orbitSpeed: 0.4, rotationSpeed: 0.1, texture: 'moon', albedo: 0.63, parentStar: 'Jupiter' },
+            { star: 'Sol', system: 'Sol', name: 'Europa', class: 'Ice Moon', radius: 0.24, distance: 15, eccentricity: 0.009, inclination: 0.47, lan: 0, axialTilt: 0, orbitSpeed: 0.3, rotationSpeed: 0.08, texture: 'moon', albedo: 0.67, parentStar: 'Jupiter' },
+            { star: 'Sol', system: 'Sol', name: 'Ganymede', class: 'Icy Moon', radius: 0.41, distance: 19, eccentricity: 0.001, inclination: 0.20, lan: 0, axialTilt: 0, orbitSpeed: 0.2, rotationSpeed: 0.05, texture: 'moon', albedo: 0.43, parentStar: 'Jupiter' },
+            { star: 'Sol', system: 'Sol', name: 'Callisto', class: 'Rocky Moon', radius: 0.38, distance: 24, eccentricity: 0.007, inclination: 0.20, lan: 0, axialTilt: 0, orbitSpeed: 0.1, rotationSpeed: 0.03, texture: 'moon', albedo: 0.17, parentStar: 'Jupiter' }
+        ]},
+        { star: 'Sol', name:'Saturn',  class: 'Gas Giant', radius:7.5,  distance: 35 * 9.58, eccentricity: 0.057, inclination: 2.49, lan: 113.7, axialTilt: 26.7, orbitSpeed:0.003, rotationSpeed:0.038, texture:'saturn', albedo: 0.34, ring:true, parentStar: 'Sol'},
+        { star: 'Sol', name:'Uranus',  class: 'Ice Giant', radius:3.5,  distance: 35 * 19.22, eccentricity: 0.046, inclination: 0.77, lan: 74.0, axialTilt: 97.8, orbitSpeed:0.002, rotationSpeed:0.03, texture:'uranus', albedo: 0.30, parentStar: 'Sol'},
+        { star: 'Sol', name:'Neptune', class: 'Ice Giant', radius:3.3,  distance: 35 * 30.05, eccentricity: 0.011, inclination: 1.77, lan: 131.8, axialTilt: 28.3, orbitSpeed:0.0015, rotationSpeed:0.03, texture:'neptune', albedo: 0.29, parentStar: 'Sol'}
+    ]
+};
+
+const solMoons = solSystemData.planets.flatMap(p => p.moons || []);
+const allPlanetData = [...solSystemData.planets, ...solMoons, ...exoplanetData];
 
 function createSystemLabel(systemName, position) {
     const labelDiv = document.createElement('div');
@@ -433,257 +572,350 @@ function createSystemLabel(systemName, position) {
     };
 }
 
-// Create label for the Sun
-labels.push(createLabel('Sol', sun));
+// Group all stars and planets from the databases into a unified system structure.
+const allSystems = {};
 
-// Add Sol to the searchable list. It's a special case not covered in other loops.
-searchableObjects.push({ name: 'Sol', type: 'star', object: sun });
-
-const allPlanetData = [...planetData, ...exoplanetData];
-
-allPlanetData.forEach(data => {
-  const planetObject = createCelestialObject(data);
-  scene.add(planetObject);
-
-  const orbitRing = createOrbit(data.distance, data.eccentricity, THREE.MathUtils.degToRad(data.inclination), THREE.MathUtils.degToRad(data.lan));
-  // Add the planet's orbit to the scene. It will be positioned later.
-  scene.add(orbitRing);
-  orbitRings.push(orbitRing);
-
-  // Create a label for the planet
-  labels.push(createLabel(data.name, planetObject));
-
-    searchableObjects.push({ name: data.name, type: 'planet', object: planetObject });
-
-  planets.push({
-    starName: data.star || 'Sol', // Default to Sol if not specified
-    planet: planetObject,
-    a: data.distance, // semi-major axis
-    e: data.eccentricity,
-    i: THREE.MathUtils.degToRad(data.inclination),
-    lan: THREE.MathUtils.degToRad(data.lan),
-    orbitSpeed: data.orbitSpeed,
-    rotationSpeed: data.rotationSpeed,
-    theta: Math.random() * 2 * Math.PI, // Random starting angle
-    orbitRing: orbitRing
-  });
+// First, add all stars from the database, grouping them by system.
+starDatabase.forEach(p => {
+    if (!allSystems[p.system]) allSystems[p.system] = { name: p.system, stars: [], planets: [] };
+    allSystems[p.system].stars.push(p);
 });
 
-function createStar(data) {
-    // 1. Convert astronomical coordinates to radians
-    const raParts = data.ra.match(/(\d+)h (\d+)m (\d+)s/);
-    const ra = (parseInt(raParts[1]) + parseInt(raParts[2])/60 + parseInt(raParts[3])/3600) * (15 * Math.PI/180);
+// Next, add all exoplanets to their respective systems.
+exoplanetData.forEach(p => {
+    // Find the star's full data to get its parent system name.
+    const starInfo = starDatabase.find(s => s.name === p.star);
+    const systemName = starInfo ? starInfo.system : p.star;
 
-    const decParts = data.dec.match(/([+-])(\d+)° (\d+)' (\d+)"/);
-    const decSign = decParts[1] === '-' ? -1 : 1;
-    const dec = (parseInt(decParts[2]) + parseInt(decParts[3])/60 + parseInt(decParts[4])/3600) * (Math.PI/180) * decSign;
+    if (!allSystems[systemName]) allSystems[systemName] = { name: systemName, stars: [], planets: [] };
+    allSystems[systemName].planets.push(p);
+});
 
-    // 2. Convert spherical to Cartesian coordinates
-    const dist = data.dist * sceneUnitsPerLy;
-    const x = dist * Math.cos(dec) * Math.cos(ra);
-    const y = dist * Math.sin(dec);
-    const z = dist * Math.sin(ra);
+const asteroidBeltUniforms = {
+    u_time: { value: 0.0 },
+    u_wobble: { value: 0.4 }, // Increased distortion for a more "potato" shape
+    u_visibility: { value: 1.0 } // Uniform to control visibility from JS
+};
 
-    // --- Create the system-scale star mesh (like the sun) ---
-    const sunMeshRadius = 1; // The base radius of the sun mesh
+function createAsteroidBelt() {
+    const asteroidCount = 5000;
+    const innerRadius = 35 * 2.1; // ~2.1 AU
+    const outerRadius = 35 * 3.3; // ~3.3 AU
+    const beltHeight = 5; // How thick the belt is vertically
 
-    let systemStarTexture = planetTextures.sun;
-    let systemStarColor = data.color;
+    const geometry = new THREE.IcosahedronGeometry(0.1, 1); // Increased detail for a more rounded base shape
 
-    // Select the correct texture based on spectral class
-    const spectralType = data.class.charAt(0).toUpperCase();
-    if (spectralType === 'A' || spectralType === 'B') {
-        systemStarTexture = planetTextures.sun_blue;
-        systemStarColor = 0xffffff; // Use neutral white to not tint the pre-colored texture
-    } else if (spectralType === 'K') {
-        systemStarTexture = planetTextures.sun_orange;
-        systemStarColor = 0xffffff;
-    } else if (spectralType === 'M') {
-        systemStarTexture = planetTextures.sun_red;
-        systemStarColor = 0xffffff;
-    }
+    // Per-instance data buffers
+    const orbitData = new Float32Array(asteroidCount * 4); // radius, speed, initialAngle, yOffset
+    const transformData = new Float32Array(asteroidCount * 4); // 3 for rotation axis, 1 for rotation speed (tumbling)
+    const scaleData = new Float32Array(asteroidCount * 3); // non-uniform scale (x, y, z)
 
-    const starMesh = new THREE.Mesh(
-        new THREE.SphereGeometry(data.radius * sunMeshRadius, 64, 64),
-        new THREE.MeshBasicMaterial({
-            map: systemStarTexture,
-            color: systemStarColor,
-            transparent: true,
-            opacity: 0, // Start invisible
-            depthWrite: false
-        })
-    );
-    starMesh.position.set(x, y, z);
-    starMesh.name = data.name;
-    scene.add(starMesh);
-
-    // Create a separate label for the system-scale mesh
-    const starMeshLabel = createLabel(data.name, starMesh);
-    labels.push(starMeshLabel);
-    starMeshes.push({ mesh: starMesh, label: starMeshLabel }); // Add to a new array for fading
-
-    // --- Create a light source for the star ---
-    const starLight = new THREE.PointLight(data.color, 1.0);
-    // Scale light power based on star's radius squared (L ∝ R^2 * T^4, this is a simplification)
-    // Use a base power similar to the sun's light.
-    const basePower = 4 * Math.PI * 100000;
-    starLight.power = basePower * (data.radius ** 2);
-    starLight.decay = 2; // Physically correct falloff
-    starLight.position.set(x, y, z);
-    starLight.visible = false; // Start invisible, fade in with scale
-    scene.add(starLight);
-    starLights.push(starLight);
-
-
-
-    let starTexture = planetTextures.star;
-    let starColor = data.color;
-
-    // If the star is a blue A-type star, use the dedicated blue texture
-    if (data.class.startsWith('A')) {
-        starTexture = planetTextures.star_blue;
-        starColor = 0xffffff; // Use neutral white to not tint the blue texture
-    }
-
-    // --- Create the interstellar star sprite ---
-    const spriteMaterial = new THREE.SpriteMaterial({
-        map: starTexture,
-        color: starColor,
-        blending: THREE.AdditiveBlending,
-        transparent: true,
-        opacity: 0, // Start invisible, fade in with distance
-        depthWrite: false // Prevent sprite from blocking other transparent objects
+    const material = new THREE.MeshBasicMaterial({
+        map: miscTextures.asteroid, // Use a basic material that is not affected by lights
+        color: 0xffffff // Ensure the texture is not tinted
     });
-    const starSprite = new THREE.Sprite(spriteMaterial);
-    starSprite.position.set(x, y, z);
-    starSprite.scale.set(data.scale * 10, data.scale * 10, 1.0);
-    starSprite.name = data.name; // For focusing
-    scene.add(starSprite);
-    
-    const starLabel = createLabel(data.name, starSprite);
-    labels.push(starLabel);
 
-    stellarObjects.push({ mesh: starSprite, label: starLabel, system: data.system });
+    for (let i = 0; i < asteroidCount; i++) {
+        const radius = THREE.MathUtils.randFloat(innerRadius, outerRadius);
+        const initialAngle = Math.random() * 2 * Math.PI;
+        // Kepler's Third Law approximation: speed is inversely proportional to sqrt(radius)
+        const speed = Math.sqrt(1 / radius) * 0.5; // Increased speed multiplier for more visible variation
+        const yOffset = THREE.MathUtils.randFloatSpread(beltHeight);
 
-    searchableObjects.push({ name: data.name, type: 'star', object: starSprite });
+        orbitData[i * 4 + 0] = radius;
+        orbitData[i * 4 + 1] = speed;
+        orbitData[i * 4 + 2] = initialAngle;
+        orbitData[i * 4 + 3] = yOffset;
 
-    // Group stars by system
-    if (!starSystems[data.system]) {
-        starSystems[data.system] = { stars: [], center: new THREE.Vector3() };
+        // Random rotation axis and speed for tumbling effect
+        const rotationAxis = new THREE.Vector3().randomDirection();
+        const rotationSpeed = THREE.MathUtils.randFloat(0.1, 0.5);
+        transformData[i * 4 + 0] = rotationAxis.x;
+        transformData[i * 4 + 1] = rotationAxis.y;
+        transformData[i * 4 + 2] = rotationAxis.z;
+        transformData[i * 4 + 3] = rotationSpeed;
+
+        // Random non-uniform scale for a "potato" shape
+        const baseScale = THREE.MathUtils.randFloat(0.5, 1.5);
+        scaleData[i * 3 + 0] = baseScale * THREE.MathUtils.randFloat(1.0, 2.5); // Elongate on X
+        scaleData[i * 3 + 1] = baseScale * THREE.MathUtils.randFloat(0.7, 1.2);
+        scaleData[i * 3 + 2] = baseScale * THREE.MathUtils.randFloat(0.7, 1.2);
     }
-    starSystems[data.system].stars.push(starSprite);
+
+    geometry.setAttribute('a_orbitData', new THREE.InstancedBufferAttribute(orbitData, 4));
+    geometry.setAttribute('a_transformData', new THREE.InstancedBufferAttribute(transformData, 4));
+    geometry.setAttribute('a_scale', new THREE.InstancedBufferAttribute(scaleData, 3));
+
+    // The onBeforeCompile logic is no longer needed for MeshBasicMaterial,
+    // but we keep the position calculation part.
+    material.onBeforeCompile = shader => {
+        // Pass our custom uniforms to the shader
+        shader.uniforms.u_time = asteroidBeltUniforms.u_time;
+        shader.uniforms.u_wobble = asteroidBeltUniforms.u_wobble; // Not used, but kept for potential future use
+        shader.uniforms.u_visibility = asteroidBeltUniforms.u_visibility;
+
+        // Add attributes and uniforms to the vertex shader
+        shader.vertexShader = `
+            uniform float u_time;
+            // uniform float u_wobble; // This uniform is not currently used in the shader.
+            uniform float u_visibility;
+
+            attribute vec4 a_orbitData;
+            attribute vec4 a_transformData;
+            attribute vec3 a_scale;
+
+            // Declare rotation matrices at a higher scope so they can be shared
+            // between the vertex position and normal calculation steps.
+            mat4 instanceRotation;
+            mat4 orbitalRotation;
+
+        ` + shader.vertexShader;
+
+        // We still need the rotation matrix function for the position calculation.
+        shader.vertexShader = shader.vertexShader.replace('#include <common>', `
+            #include <common>
+            mat4 rotationMatrix(vec3 axis, float angle) {
+                axis = normalize(axis);
+                float s = sin(angle);
+                float c = cos(angle);
+                float oc = 1.0 - c;
+                return mat4(oc * axis.x * axis.x + c,           oc * axis.x * axis.y - axis.z * s,  oc * axis.z * axis.x + axis.y * s,  0.0,
+                            oc * axis.x * axis.y + axis.z * s,  oc * axis.y * axis.y + c,           oc * axis.y * axis.z - axis.x * s,  0.0,
+                            oc * axis.z * axis.x - axis.y * s,  oc * axis.y * axis.z + axis.x * s,  oc * axis.z * axis.z + c,           0.0,
+                            0.0,                                0.0,                                0.0,                                1.0);
+            }`);
+        // Inject a single block of code to handle all instance-specific calculations.
+        // This ensures all variables are calculated in the correct order before use.
+        shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+                // --- Instance-specific Orbital and Rotational Calculations ---
+
+                float radius = a_orbitData.x;
+                float speed = a_orbitData.y;
+                float initialAngle = a_orbitData.z;
+                float yOffset = a_orbitData.w;
+ 
+                // 1. Calculate tumbling rotation
+                vec3 rotationAxis = a_transformData.xyz;
+                float rotationSpeed = a_transformData.w;
+                float rotationAngle = u_time * rotationSpeed;
+                instanceRotation = rotationMatrix(rotationAxis, rotationAngle);
+
+                // 2. Calculate orbital position and alignment
+                float currentAngle = initialAngle + u_time * speed;
+                vec3 orbitalPosition = vec3(radius * cos(currentAngle), yOffset, radius * sin(currentAngle));
+                vec3 orbitalTangent = normalize(vec3(-radius * sin(currentAngle), 0.0, radius * cos(currentAngle)));
+                vec3 up = vec3(0.0, 1.0, 0.0);
+                vec3 orbitalBinormal = normalize(cross(orbitalTangent, up));
+                vec3 orbitalNormal = normalize(cross(orbitalBinormal, orbitalTangent));
+                orbitalRotation = mat4(vec4(orbitalTangent, 0.0), vec4(orbitalNormal, 0.0), vec4(orbitalBinormal, 0.0), vec4(0.0, 0.0, 0.0, 1.0));
+ 
+                // 3. Apply transformations to the vertex position
+                vec3 transformed = ((orbitalRotation * instanceRotation * vec4(position * a_scale, 1.0)).xyz + orbitalPosition) * u_visibility;
+            `);
+    };
+
+    const instancedMesh = new THREE.InstancedMesh(geometry, material, asteroidCount);
+    instancedMesh.castShadow = false; // Performance: asteroids don't need to cast shadows
+    instancedMesh.receiveShadow = false; // Performance: asteroids don't need to receive shadows
+// Disable frustum culling for the entire belt. This prevents the whole InstancedMesh
+    // from disappearing when the camera is inside the belt and the object's bounding
+    // sphere is no longer in the camera's view.
+    instancedMesh.frustumCulled = false;
+
+    // The belt itself doesn't need a name for raycasting, as we won't be clicking individual asteroids.
+    scene.add(instancedMesh);
+    return instancedMesh;
 }
 
-// Calculate system centers and create system labels
-starDatabase.forEach(createStar);
-Object.keys(starSystems).forEach(systemName => {
-    const system = starSystems[systemName];
-    system.stars.forEach(star => system.center.add(star.position));
-    system.center.divideScalar(system.stars.length);
-    createSystemLabel(systemName, system.center);
-});
+// Create and store the asteroid belt
+asteroidBelt = createAsteroidBelt();
 
-function createStarfield() {
-    const starCount = 20000;
-    const vertices = [];
-    // Define a shell for the starfield to ensure nearby stars are the closest objects.
-    const minRadius = 20 * sceneUnitsPerLy; // Start beyond the nearby stars
-    const maxRadius = 150 * sceneUnitsPerLy; // Extend well beyond the galactic transition point
 
-    for (let i = 0; i < starCount; i++) {
-        // Generate a random point on a sphere, then scale it by a random radius
+/**
+ * Creates a volumetric 3D galaxy from point clouds, based on the density of a texture.
+ * This is a simplified version of what's needed for a full "100,000 Stars" effect.
+ */
+function createVolumetricGalaxy() {
+    const thinDiskStars = 100000;
+    const thickDiskStars = 50000;
+    const galaxyBulgeStars = 50000;
+    const galaxyHaloStars = 1000; // Reduced for a sparser halo
+
+    const galaxySize = 100000 * sceneUnitsPerLy; // 100k light-year diameter (unchanged)
+    const thinDiskThickness = 800 * sceneUnitsPerLy;
+    const thickDiskThickness = 3000 * sceneUnitsPerLy;
+
+    // --- Create a canvas to sample the galaxy texture for density mapping ---
+    const densityMapCanvas = document.createElement('canvas');
+    const densityMapCtx = densityMapCanvas.getContext('2d', { willReadFrequently: true });
+    const galaxyImage = planetTextures.galaxy.image;
+    densityMapCanvas.width = galaxyImage.width;
+    densityMapCanvas.height = galaxyImage.height;
+    densityMapCtx.drawImage(galaxyImage, 0, 0);
+    const densityMapData = densityMapCtx.getImageData(0, 0, densityMapCanvas.width, densityMapCanvas.height).data;
+
+    // --- 1. Thin Disk (Young Stars in Spiral Arms) ---
+    const thinDiskVertices = [];
+    while (thinDiskVertices.length < thinDiskStars * 3) {
+        const r = Math.random() * galaxySize / 2;
+        const angle = Math.random() * 2 * Math.PI;
+        const x = r * Math.cos(angle);
+        const z = r * Math.sin(angle);
+
+        // Map world coordinates to texture UV coordinates
+        const u = (x / galaxySize) + 0.5;
+        const v = (z / galaxySize) + 0.5;
+
+        // Get pixel brightness from the density map
+        const tx = Math.floor(u * densityMapCanvas.width);
+        const ty = Math.floor(v * densityMapCanvas.height);
+        const pixelIndex = (ty * densityMapCanvas.width + tx) * 4;
+        const brightness = densityMapData[pixelIndex] / 255; // Use the red channel for brightness
+
+        // Rejection sampling: only place a star if a random value is less than the pixel's brightness.
+        // Squaring the brightness makes the contrast much higher, heavily depopulating darker areas.
+        if (Math.random() > Math.pow(brightness, 2)) continue; // Skip this star if it's in a dark area.
+
+        const scaleHeight = thinDiskThickness * Math.exp(-r / (galaxySize / 5));
+        const y = -Math.log(1 - Math.random()) * scaleHeight * (Math.random() < 0.5 ? 1 : -1);
+        thinDiskVertices.push(x, y, z);
+    }
+    const thinDiskGeometry = new THREE.BufferGeometry();
+    thinDiskGeometry.setAttribute('position', new THREE.Float32BufferAttribute(thinDiskVertices, 3));
+    const thinDiskMaterial = new THREE.PointsMaterial({
+        color: 0xD0E0FF, // Brighter, bluer for young stars
+        size: 15000, // Adjust size for visibility at galactic scale
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    const thinDiskPoints = new THREE.Points(thinDiskGeometry, thinDiskMaterial);
+    scene.add(thinDiskPoints);
+
+    // --- 2. Thick Disk (Older, more dispersed stars) ---
+    const thickDiskVertices = [];
+    while (thickDiskVertices.length < thickDiskStars * 3) {
+        const r = Math.random() * galaxySize / 2;
+        const angle = Math.random() * 2 * Math.PI;
+        const x = r * Math.cos(angle);
+        const z = r * Math.sin(angle);
+
+        // Also apply density mapping to the thick disk, but less strictly.
+        const u = (x / galaxySize) + 0.5;
+        const v = (z / galaxySize) + 0.5;
+        const tx = Math.floor(u * densityMapCanvas.width);
+        const ty = Math.floor(v * densityMapCanvas.height);
+        const pixelIndex = (ty * densityMapCanvas.width + tx) * 4;
+        const brightness = densityMapData[pixelIndex] / 255;
+
+        // Use a less aggressive rejection sampling (sqrt) so the thick disk is more diffuse
+        // but still respects the dark lanes.
+        if (Math.random() > Math.sqrt(brightness)) continue;
+
+        const scaleHeight = thickDiskThickness * Math.exp(-r / (galaxySize / 4)); const y = -Math.log(1 - Math.random()) * scaleHeight * (Math.random() < 0.5 ? 1 : -1);
+        thickDiskVertices.push(x, y, z);
+    }
+    const thickDiskGeometry = new THREE.BufferGeometry();
+    thickDiskGeometry.setAttribute('position', new THREE.Float32BufferAttribute(thickDiskVertices, 3));
+    const thickDiskMaterial = new THREE.PointsMaterial({
+        color: 0xFFF0D9, // Warmer for older stars
+        size: 12000,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    const thickDiskPoints = new THREE.Points(thickDiskGeometry, thickDiskMaterial);
+    scene.add(thickDiskPoints);
+
+    // --- 3. Galaxy Bulge (Central Core) ---
+    const bulgeVertices = [];
+    const bulgeStdDev = 4000 * sceneUnitsPerLy; // Standard deviation for the Gaussian distribution
+
+    // Helper function for generating normally distributed random numbers (Box-Muller transform)
+    const gaussianRandom = () => {
+        const u = 1 - Math.random(); // (0, 1]
+        const v = Math.random();
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    };
+
+    for (let i = 0; i < galaxyBulgeStars; i++) {
+        // Generate positions using a Gaussian distribution for a smooth falloff from the center.
+        const x = gaussianRandom() * bulgeStdDev;
+        const y = gaussianRandom() * bulgeStdDev * 0.5625; // The bulge is now 0.75x as tall
+        const z = gaussianRandom() * bulgeStdDev;
+        bulgeVertices.push(x, y, z);
+    }
+
+    const bulgeGeometry = new THREE.BufferGeometry();
+    bulgeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(bulgeVertices, 3));
+    const bulgeMaterial = new THREE.PointsMaterial({
+        color: 0xFFE082, // A richer, more golden-yellow for the core
+        size: 25000,     // Increased size for a brighter appearance
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    const bulgePoints = new THREE.Points(bulgeGeometry, bulgeMaterial);
+    scene.add(bulgePoints);
+
+    // --- 4. Galaxy Halo ---
+    const haloVertices = [];
+    const haloRadius = 120000 * sceneUnitsPerLy; // Reduced radius for a smaller halo
+    for (let i = 0; i < galaxyHaloStars; i++) {
         const u = Math.random();
         const v = Math.random();
-        const theta = 2 * Math.PI * u;
-        const phi = Math.acos(2 * v - 1);
-
-        // Generate a radius within the shell for uniform volume distribution
-        const r = Math.cbrt(THREE.MathUtils.lerp(minRadius**3, maxRadius**3, Math.random()));
-        
-        const x = r * Math.sin(phi) * Math.cos(theta);
-        const y = r * Math.sin(phi) * Math.sin(theta);
-        const z = r * Math.cos(phi);
-
-        vertices.push(x, y, z);
+        const theta = Math.random() * 2 * Math.PI;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = haloRadius * Math.cbrt(Math.random());
+        const x = r * Math.sin(phi) * Math.cos(theta); const y = r * Math.sin(phi) * Math.sin(theta); const z = r * Math.cos(phi);
+        haloVertices.push(x, y, z);
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-
-    const material = new THREE.PointsMaterial({
-        color: 0xffffff,
-        size: 50,
+    const haloGeometry = new THREE.BufferGeometry();
+    haloGeometry.setAttribute('position', new THREE.Float32BufferAttribute(haloVertices, 3));
+    const haloMaterial = new THREE.PointsMaterial({
+        color: 0xCAD7FF, // Cooler color for halo stars
+        size: 15000, // Reduced size to make stars less prominent
         sizeAttenuation: true,
         transparent: true,
-        opacity: 0 // Start invisible
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
     });
+    const haloPoints = new THREE.Points(haloGeometry, haloMaterial);
+    scene.add(haloPoints);
 
-    const starfield = new THREE.Points(geometry, material);
-    scene.add(starfield);
-    return starfield;
+    return { thinDisk: thinDiskPoints, thickDisk: thickDiskPoints, bulge: bulgePoints, halo: haloPoints };
 }
 
-const starfield = createStarfield();
+function createGalaxyMeshes() {
+    const galaxySize = sceneUnitsPerLy * 100000; // 100k light-year diameter
+    // Create the geometry in the XZ plane directly so it matches the volumetric galaxy.
+    const geometry = new THREE.PlaneGeometry(galaxySize, galaxySize, 1, 1);
+    geometry.rotateX(-Math.PI / 2);
 
-function createProceduralGalaxy() {
-    const starCount = 100000;
-    const armCount = 4;
-    const galaxyRadius = sceneUnitsPerLy * 50000; // 50k light-years radius
-    const barLength = galaxyRadius * 0.4;
-    const barWidth = galaxyRadius * 0.08;
-    const armRotation = 2.5; // How tightly the arms are wound
-    const randomness = 0.5;
-
-    const vertices = [];
-    const colors = [];
-    const baseColor = new THREE.Color(0x88aaff);
-
-    for (let i = 0; i < starCount; i++) {
-        const isBarStar = i < starCount * 0.2; // 20% of stars in the central bar
-        let x, y, z, r, theta;
-
-        if (isBarStar) {
-            x = THREE.MathUtils.randFloatSpread(barLength);
-            y = THREE.MathUtils.randFloatSpread(barWidth * 0.2); // Flatter bar
-            z = THREE.MathUtils.randFloatSpread(barWidth);
-        } else {
-            r = Math.random() * galaxyRadius;
-            const armIndex = i % armCount;
-            theta = (r / galaxyRadius) * armRotation + (armIndex / armCount) * 2 * Math.PI;
-
-            // Add randomness to make arms look less perfect
-            const randomAngle = (Math.random() - 0.5) * randomness;
-            const randomRadius = (Math.random() - 0.5) * randomness * r * 0.5;
-
-            x = Math.cos(theta + randomAngle) * (r + randomRadius);
-            y = THREE.MathUtils.randFloatSpread(galaxyRadius * 0.05); // Make the galaxy disk flat
-            z = Math.sin(theta + randomAngle) * (r + randomRadius);
-        }
-
-        vertices.push(x, y, z);
-
-        // Color variation
-        const color = baseColor.clone();
-        color.lerp(new THREE.Color(0xffddaa), Math.random() * 0.4);
-        colors.push(color.r, color.g, color.b);
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-        size: 1500,
-        sizeAttenuation: true,
-        vertexColors: true,
+    const createMaterial = (texture) => new THREE.MeshBasicMaterial({
+        map: texture,
         transparent: true,
-        opacity: 0 // Start invisible
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide // Render both sides
     });
-    const galaxyPoints = new THREE.Points(geometry, material);
-    scene.add(galaxyPoints);
-    return galaxyPoints;
-}
 
-const galaxy = createProceduralGalaxy();
+    const galaxyMesh = new THREE.Mesh(geometry, createMaterial(planetTextures.galaxy));
+    scene.add(galaxyMesh);
+
+    const galaxyLabeledMesh = new THREE.Mesh(geometry, createMaterial(planetTextures.galaxy_labeled));
+    scene.add(galaxyLabeledMesh);
+
+    return { galaxy: galaxyMesh, galaxyLabeled: galaxyLabeledMesh };
+}
 
 // --- Font Loading for 3D Text (Placeholder for future use if needed) ---
 // const fontLoader = new FontLoader();
@@ -692,10 +924,25 @@ const galaxy = createProceduralGalaxy();
 // });
 
 // --- UI Controls ---
+const uiContainer = document.getElementById('ui-container');
+const uiToggleButton = document.getElementById('ui-toggle-button');
+
+uiToggleButton.addEventListener('click', () => {
+    const isCollapsed = uiContainer.classList.toggle('collapsed');
+    // Change the arrow direction based on the collapsed state
+    uiToggleButton.innerHTML = isCollapsed ? '&raquo;' : '&laquo;';
+});
+
+
 const showOrbitsCheckbox = document.getElementById('show-orbits-checkbox');
 showOrbitsCheckbox.addEventListener('change', (e) => {
+    const isVisible = e.target.checked;
     orbitRings.forEach(ring => {
-        ring.visible = e.target.checked;
+        ring.ring.visible = isVisible;
+    });
+    // Also toggle the visibility of all moon orbits
+    moons.forEach(moon => {
+        if (moon.orbit) moon.orbit.visible = isVisible;
     });
 });
 
@@ -706,6 +953,18 @@ showLabelsCheckbox.addEventListener('change', (e) => {
     // This only toggles the labels, it should not affect the info panel
     // or the focusedObject state.
     labelsContainer.style.visibility = isVisible ? 'visible' : 'hidden'; 
+});
+
+const showGalaxyDiagramCheckbox = document.getElementById('show-galaxy-diagram-checkbox');
+showGalaxyDiagramCheckbox.addEventListener('change', () => {
+    // The actual fade logic is handled in the animate loop
+});
+
+const showAsteroidsCheckbox = document.getElementById('show-asteroids-checkbox');
+showAsteroidsCheckbox.addEventListener('change', (e) => {
+    if (asteroidBelt) {
+        asteroidBelt.visible = e.target.checked;
+    }
 });
 
 const pauseAnimationCheckbox = document.getElementById('pause-animation-checkbox');
@@ -767,20 +1026,51 @@ pauseAnimationCheckbox.addEventListener('change', (e) => {
 
 const distanceCounter = document.getElementById('distance-counter');
 const scaleIndicator = document.getElementById('scale-indicator');
-const autoZoomIndicator = document.getElementById('auto-zoom-indicator');
 
 // --- Raycasting and Focusing ---
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let focusedObject = null;
+let previousFocusedObject = null; // To track changes in focus
+
+// --- Drag detection to prevent click-after-drag issues ---
+let isDragging = false;
+let mouseDownPos = new THREE.Vector2();
+
+let cameraTransition = {
+    active: false,
+    startTime: 0,
+    duration: 1500, // 1.5 seconds for a smooth glide
+    startPos: new THREE.Vector3(),
+    endPos: new THREE.Vector3(),
+    startTarget: new THREE.Vector3(),
+    endTarget: new THREE.Vector3()
+};
+
+window.addEventListener('mousedown', (e) => {
+    isDragging = false;
+    mouseDownPos.set(e.clientX, e.clientY);
+});
+window.addEventListener('mousemove', (e) => {
+    // If the mouse moves more than a few pixels, consider it a drag.
+    if (mouseDownPos.distanceTo(new THREE.Vector2(e.clientX, e.clientY)) > 5) isDragging = true;
+});
 
 const infoBox = document.getElementById('info-box');
 const infoName = document.getElementById('info-name');
 const infoDetails = document.getElementById('info-details');
+const pinButton = document.getElementById('pin-button');
+const lockCameraCheckbox = document.getElementById('lock-camera-checkbox');
 
 function onMouseClick(event) {
     // If the click originated from one of the UI containers, ignore it.
     // This prevents clicks on UI elements from being interpreted as clicks on the 3D scene.
+
+    // If the user was dragging (rotating the camera), don't process this click event
+    // for focusing/defocusing, as it's the end of a drag, not a selection click.
+    if (isDragging) {
+        return;
+    }
     if (event.target.closest('#ui-container, #info-box, #distance-counter')) {
         return;
     }
@@ -803,6 +1093,20 @@ function onMouseClick(event) {
         // Re-clicking the same object will do nothing.
         if (focusedObject !== clickedObject) {
             focusedObject = clickedObject;
+
+            // If not in lock mode, start a smooth camera transition
+            if (!lockCameraCheckbox.checked) {
+                cameraTransition.active = true;
+                cameraTransition.startTime = performance.now();
+                cameraTransition.startPos.copy(camera.position);
+                cameraTransition.startTarget.copy(controls.target);
+
+                const newTargetPos = new THREE.Vector3();
+                clickedObject.getWorldPosition(newTargetPos);
+                cameraTransition.endTarget.copy(newTargetPos);
+
+                cameraTransition.endPos.copy(camera.position).sub(controls.target).add(newTargetPos);
+            }
         }
     } else {
         // Clicked on empty space, unfocus
@@ -812,34 +1116,64 @@ function onMouseClick(event) {
     updateInfoPanel();
 }
 
+// Cancel any active camera transition if the user interacts with the controls.
+controls.addEventListener('start', () => {
+    cameraTransition.active = false;
+});
+
+
 function updateInfoPanel() {
     if (!focusedObject) {
         infoBox.style.display = 'none';
+        pinButton.style.display = 'none';
+        lockCameraCheckbox.style.display = 'none';
         return;
     }
 
-    const data = planetData.find(p => p.name === focusedObject.name);
+    let data = allPlanetData.find(p => p.name === focusedObject.name);
     const starData = starDatabase.find(s => s.name === focusedObject.name);
+    let moonData = null;
+    let parentPlanetData = null;
+
+    // Search for moon data if no planet or star was found
+    if (!data && !starData) {
+        for (const planet of solSystemData.planets) { // Search within the original nested structure
+            const foundMoon = planet.moons?.find(m => m.name === focusedObject.name);
+            if (foundMoon) { moonData = foundMoon; parentPlanetData = planet; break; }
+        }
+        if (moonData) data = moonData; // Treat found moon as the main data object
+    }
 
     if (focusedObject.name === 'Sol') {
-        infoName.textContent = 'Sol';
-        infoDetails.innerHTML = `Type: Yellow Dwarf (G2V)<br>Radius: 696,340 km<br>The star at the center of our solar system.`;
-        infoBox.style.display = 'block';
+        infoName.textContent = 'Sol'; // This is a special case, handled like a star
+        infoDetails.innerHTML = `Type: Yellow Dwarf (G2V)<br>System: Sol<br>Radius: 696,340 km`;
     } else if (data) {
         infoName.textContent = data.name;
         const earthRadiusKm = 6371;
         const planetRadiusKm = data.radius * earthRadiusKm;
-        infoDetails.innerHTML = `Type: Planet<br>Parent Star: ${data.star || 'Unknown'}<br>Radius: ${planetRadiusKm.toLocaleString()} km (${data.radius}x Earth)`;
-        infoBox.style.display = 'block';
+        infoDetails.innerHTML = `Type: ${data.class || (data.parentStar.includes('Sol') ? 'Planet' : 'Moon')}<br>System: ${data.system || data.star}<br>Parent Body: ${data.parentStar}<br>Radius: ${planetRadiusKm.toLocaleString()} km (${data.radius}x Earth)`;
     } else if (starData) { // Check for star data
         infoName.textContent = starData.name;
         const sunRadiusKm = 696340;
         const starRadiusKm = starData.radius * sunRadiusKm;
         const starTypeName = getStarTypeName(starData.class);
-        infoDetails.innerHTML = `Type: ${starTypeName} (${starData.class})<br>Radius: ${starRadiusKm.toLocaleString()} km (${starData.radius}x Sol)<br>Distance from Sol: ${starData.dist} light-years`;
-        infoBox.style.display = 'block';
+        infoDetails.innerHTML = `Type: ${starTypeName} (${starData.class})<br>System: ${starData.system}<br>Radius: ${starRadiusKm.toLocaleString()} km (${starData.radius}x Sol)<br>Distance from Sol: ${starData.dist} light-years`;
     } else {
         infoBox.style.display = 'none';
+        pinButton.style.display = 'none';
+        return;
+    }
+
+    // If we have valid data, show the info box and configure the pin button
+    if (infoName.textContent) {
+        infoBox.style.display = 'block';
+        pinButton.style.display = 'inline-block';
+        lockCameraCheckbox.style.display = 'inline-block';
+        pinButton.textContent = pinnedObjects.has(focusedObject.name) ? 'Unpin' : 'Pin';
+    } else {
+        infoBox.style.display = 'none';
+        lockCameraCheckbox.style.display = 'none';
+        pinButton.style.display = 'none';
     }
 }
 
@@ -861,12 +1195,75 @@ function getStarTypeName(spectralClass) {
         case 'G': return 'Yellow Dwarf';
         case 'K': return 'Orange Dwarf';
         case 'M': return 'Red Dwarf';
+        case 'D': return 'White Dwarf';
         case 'L':
         case 'T':
         case 'Y': return 'Brown Dwarf';
         default: return 'Star';
     }
 }
+
+const pinnedItemsDropdown = document.getElementById('pinned-items-dropdown');
+const pinnedItemsButton = document.getElementById('pinned-items-button');
+const pinnedItemsList = document.getElementById('pinned-items-list');
+
+function updatePinnedItemsList() {
+    pinnedItemsList.innerHTML = ''; // Clear the list
+    const count = pinnedObjects.size;
+    pinnedItemsButton.textContent = `Pinned Items (${count})`;
+
+    if (count === 0) {
+        pinnedItemsDropdown.style.display = 'none';
+        return;
+    }
+
+    pinnedItemsDropdown.style.display = 'block';
+
+    pinnedObjects.forEach(name => { // The 'name' here is the object's name string
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'pinned-item';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = name;
+        nameSpan.addEventListener('click', () => {
+            // Find the object by name from our searchable list and focus it
+            const item = searchableObjects.find(o => o.name === name);
+            if (item && item.object) {
+                focusedObject = item.object;
+                updateInfoPanel();
+            }
+        });
+
+        const unpinBtn = document.createElement('button');
+        unpinBtn.innerHTML = '&times;'; // Use a multiplication sign for the 'x'
+        unpinBtn.className = 'unpin-button';
+        unpinBtn.title = `Unpin ${name}`;
+        unpinBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            pinnedObjects.delete(name);
+            updatePinnedItemsList(); // Refresh the pinned list UI
+            updateInfoPanel(); // Refresh the main pin button if the currently focused object was unpinned
+        });
+
+        itemDiv.appendChild(nameSpan);
+        itemDiv.appendChild(unpinBtn);
+        pinnedItemsList.appendChild(itemDiv);
+    });
+}
+
+pinnedItemsButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const isVisible = pinnedItemsList.style.display === 'block';
+    pinnedItemsList.style.display = isVisible ? 'none' : 'block';
+});
+
+// Hide pinned items list when clicking elsewhere
+window.addEventListener('click', (event) => {
+    // Check if the click was outside the dropdown container
+    if (!event.target.closest('#pinned-items-dropdown')) {
+        pinnedItemsList.style.display = 'none';
+    }
+});
 
 window.addEventListener('click', onMouseClick);
 
@@ -905,6 +1302,14 @@ function updateSuggestions() {
             });
             suggestionDiv.addEventListener('click', () => {
                 focusedObject = item.object;
+
+                // If we are in a system and select an object in a DIFFERENT system,
+                // immediately switch to interstellar view.
+                const planetInfo = allPlanetData.find(p => p.name === item.name); // This uses the combined data
+                if (planetInfo && planetInfo.star !== lastFocusedSystem) {
+                    currentScale = 'interstellar';
+                }
+
                 updateInfoPanel();
                 searchInput.value = ''; // Clear input
                 suggestionsBox.style.display = 'none'; // Hide suggestions
@@ -930,6 +1335,21 @@ window.addEventListener('click', (event) => {
 // Prevent the main click handler from unfocusing when a suggestion is clicked
 suggestionsBox.addEventListener('click', (event) => {
     event.stopPropagation();
+});
+
+pinButton.addEventListener('click', (event) => {
+    event.stopPropagation(); // Prevent the main click handler from firing
+    if (!focusedObject || !focusedObject.name) return;
+
+    if (pinnedObjects.has(focusedObject.name)) {
+        pinnedObjects.delete(focusedObject.name);
+        pinButton.textContent = 'Pin';
+        updatePinnedItemsList();
+    } else {
+        pinnedObjects.add(focusedObject.name);
+        pinButton.textContent = 'Unpin';
+        updatePinnedItemsList();
+    }
 });
 
 // --- Credits Menu ---
@@ -963,11 +1383,11 @@ let autoZoom = {
     endTarget: new THREE.Vector3()
 };
 
+let desiredCameraDistance = 0;
 // Cancel auto-zoom if user interacts with controls
 controls.addEventListener('start', () => {
     if (autoZoom.active) {
         autoZoom.active = false;
-        autoZoomIndicator.style.display = 'none';
     }
 });
 
@@ -983,8 +1403,8 @@ const CINEMATIC_SCALES = {
 
 const REALISTIC_SCALES = {
     PLANET_TO_SYSTEM: 50,             // Scene units
-    SYSTEM_TO_INTERSTELLAR: 63241,     // 1 ly in AU
-    INTERSTELLAR_TO_GALACTIC: 3162055*2,  // 100 ly in AU
+    SYSTEM_TO_INTERSTELLAR: 63241,     // ~1 ly in AU
+    INTERSTELLAR_TO_GALACTIC: 18972300, // ~300 ly in AU
     INTERSTELLAR_VIEW_DIST: 200000,    // ~3 ly in AU
     GALACTIC_VIEW_DIST: 2.5e6,    // ~40 ly in AU
 };
@@ -998,7 +1418,6 @@ function startAutoZoom(targetDist, targetFocus = new THREE.Vector3(0,0,0)) {
     autoZoom.endPos.set(targetFocus.x, targetFocus.y + targetDist, targetFocus.z); // Position camera above the target focus point
     autoZoom.startTarget.copy(controls.target);
     autoZoom.endTarget.copy(targetFocus);
-    autoZoomIndicator.style.display = 'block';
 }
 
 /**
@@ -1009,15 +1428,15 @@ function startAutoZoom(targetDist, targetFocus = new THREE.Vector3(0,0,0)) {
  * @param {boolean} fadeLabel - Flag to control if the label should be faded.
  */
 function applyFade(celestial, opacity, isPlanet = false, fadeLabel = true) {
-    const mesh = isPlanet ? celestial.planet : (celestial.mesh || celestial);
+    const celestialMesh = isPlanet ? celestial.planet : (celestial.mesh || celestial);
     const orbit = isPlanet ? orbitRings.find(o => o.uuid === celestial.orbitRingUUID) : celestial.orbit;
     const label = celestial.label;
 
     // Fade the main mesh(es)
-    if (mesh) {
-        mesh.traverse(child => {
+    if (celestialMesh) {
+        celestialMesh.traverse(child => {
             // Don't fade Venus's permanent atmosphere
-            if (child.isMesh && child.material && child.material.map !== planetTextures.venusAtmos) {
+            if (child.isMesh && child.material && child.material.map !== planetTextures.venusAtmos && child.material.opacity !== undefined) {
                 child.material.opacity = opacity;
                 child.material.transparent = opacity < 1.0;
             }
@@ -1025,8 +1444,14 @@ function applyFade(celestial, opacity, isPlanet = false, fadeLabel = true) {
     }
 
     // Fade the orbit line
-    if (orbit && orbit.material) {
-        orbit.material.opacity = opacity * (isPlanet ? 0.3 : 0.5);
+    if (isPlanet) {
+        if (orbit && orbit.ring && orbit.ring.material) {
+            orbit.ring.material.opacity = opacity * 0.6; // Increased brightness
+        }
+    } else if (orbit && orbit.material) { // This handles moon orbits.
+        // Ensure the orbit is not shown if the global checkbox is off.
+        if (!showOrbitsCheckbox.checked) opacity = 0;
+        orbit.material.opacity = opacity * 1.0; // Increased brightness
     }
 
     // Fade the label
@@ -1071,9 +1496,12 @@ function animate() {
     // Rebuild the list of clickable objects each frame based on visibility.
     // This prevents trying to click on objects that have been faded out.
     intersectableObjects = [];
-    if (sun.material.opacity > 0.1) intersectableObjects.push(sun);
+    starMeshes.forEach(sm => {
+        if (sm.material.opacity > 0.1) intersectableObjects.push(sm);
+    });
     planets.forEach(p => {
-        if (p.planet.children[0].material.opacity > 0.1) {
+        // Check the opacity of the actual surface mesh inside the planet's group
+        if (p.planet.children[0] && p.planet.children[0].material.opacity > 0.1) {
             intersectableObjects.push(p.planet);
         }
     });
@@ -1119,17 +1547,26 @@ function animate() {
             pos.applyQuaternion(q);
             p.planet.position.copy(pos);
 
-            // For exoplanets, offset the position by their star's position
-            const parentStar = stellarObjects.find(s => s.mesh.name === p.starName);
+            // For exoplanets, offset the position by their parent star's position.
+            const parentStar = stellarObjects.find(s => s.mesh.name === p.parentStar);
             if (parentStar) {
                 p.planet.position.add(parentStar.mesh.position);
                 // Also move the orbit ring to the star's position
-                p.orbitRing.position.copy(parentStar.mesh.position);
+                const orbitData = orbitRings.find(o => o.ring.uuid === p.planet.orbitRingUUID);
+                if (orbitData) {
+                    orbitData.ring.position.copy(parentStar.mesh.position);
+                }
             }
 
             // Planet's own rotation (around its Y-axis)
-            p.planet.rotation.y += p.rotationSpeed * animationSpeed;
+            // We rotate the first child (the surface mesh) instead of the whole group.
+            if (p.planet.children[0]) p.planet.children[0].rotation.y += p.rotationSpeed * animationSpeed;
         });
+    }
+
+    // Animate the asteroid belt
+    if (asteroidBelt && !isAnimationPaused) {
+        asteroidBeltUniforms.u_time.value += 0.1 * animationSpeed; // Always update time
     }
 
     // Update labels
@@ -1176,11 +1613,11 @@ function animate() {
 
     // --- Scale State Machine ---
     if (!autoZoom.active) {
-        const isPlanetFocused = focusedObject && planetData.some(p => p.name === focusedObject.name);
+        const isPlanetOrMoonFocused = focusedObject && (allPlanetData.some(p => p.name === focusedObject.name) || moons.some(m => m.mesh.name === focusedObject.name));
         
-        if (currentScale === 'system' && isPlanetFocused && distanceToTarget < SCALES.PLANET_TO_SYSTEM) {
+        if (currentScale === 'system' && isPlanetOrMoonFocused && distanceToTarget < SCALES.PLANET_TO_SYSTEM) {
             currentScale = 'planet';
-        } else if (currentScale === 'planet' && (!isPlanetFocused || distanceToTarget > SCALES.PLANET_TO_SYSTEM * 1.2)) {
+        } else if (currentScale === 'planet' && (!isPlanetOrMoonFocused || distanceToTarget > SCALES.PLANET_TO_SYSTEM * 1.2)) {
             currentScale = 'system';
         } else if (currentScale === 'system' && distanceInAU > SCALES.SYSTEM_TO_INTERSTELLAR * 1.2) { // Added a buffer to prevent flickering
             currentScale = 'interstellar';
@@ -1192,11 +1629,11 @@ function animate() {
             currentScale = 'galactic';
             const galacticViewDistLy = 100;
             const galacticViewDistScene = galacticViewDistLy * sceneUnitsPerLy;
-            startAutoZoom(galacticViewDistScene, lastFocusedStarPosition);
+            startAutoZoom(galacticViewDistScene, new THREE.Vector3(0,0,0)); // Zoom out towards galactic center
         } else if (currentScale === 'galactic' && distanceInAU < SCALES.INTERSTELLAR_TO_GALACTIC) {
             currentScale = 'interstellar';
             startAutoZoom(SCALES.INTERSTELLAR_TO_GALACTIC * 0.8 * sceneUnitsPerAU);
-        } else if (currentScale === 'planet' && !isPlanetFocused) {
+        } else if (currentScale === 'planet' && !isPlanetOrMoonFocused) {
             // If we are in planet view but lose focus on a planet, go back to system view
             currentScale = 'system';
         }
@@ -1213,7 +1650,6 @@ function animate() {
 
         if (progress >= 1.0) {
             autoZoom.active = false;
-            autoZoomIndicator.style.display = 'none';
         }
     }
 
@@ -1225,142 +1661,256 @@ function animate() {
     // New fade logic specifically for planet labels based on a fixed AU distance.
     const planetLabelFade = THREE.MathUtils.smoothstep(distanceInAU, 450, 500);
 
+    const isInterstellarView = currentScale === 'interstellar' || currentScale === 'galactic';
+    const interstellarOpacity = systemFade * (1.0 - interstellarFade); // Fade in, then out
+
     // --- Fading for Sol System vs Sol Sprite ---
     const solarSystemOpacity = 1.0 - systemFade;
 
-    // Fade out the detailed sun mesh and its label
-    sun.material.opacity = solarSystemOpacity;
-    const solSystemLabel = labels.find(l => l.object === sun);
-    if (solSystemLabel) {
-        // Only show the system-scale label for Sol when not in interstellar view
-        const isInterstellarView = currentScale === 'interstellar' || currentScale === 'galactic';
-        const opacity = isInterstellarView ? 0 : solarSystemOpacity;
-        solSystemLabel.element.style.opacity = opacity;
-        solSystemLabel.element.style.pointerEvents = opacity > 0.5 ? 'auto' : 'none';
-    }
-
-    // Fade out solar system objects
     planets.forEach(p => {
-        // Determine if the planet belongs to the currently focused system
-        const isLocalPlanet = p.starName === lastFocusedSystem;
+        // Determine the planet's system. For Sol system planets, p.starName is 'Sol'.
+        // For exoplanets, we look up the system from the star database. This was the source of the bug.
+        const parentSystem = p.starName === 'Sol' 
+            ? 'Sol' 
+            : starDatabase.find(s => s.name === p.parentStar)?.system;
+            
+        const isLocalPlanet = parentSystem === lastFocusedSystem;
         const planetOpacity = isLocalPlanet ? solarSystemOpacity : 0;
 
         // We need to find the corresponding label for the planet
         p.label = labels.find(l => l.object === p.planet);
+
+        // Fade the orbit ring
+        const orbitData = orbitRings.find(o => o.ring.uuid === p.planet.orbitRingUUID);
+        if (orbitData) orbitData.ring.material.opacity = isLocalPlanet ? (solarSystemOpacity * 0.6) : 0; // Original fading logic
         // The planet mesh fades at the system scale. We pass 'false' to prevent applyFade from touching the label.
         applyFade(p, planetOpacity, true, false);
         // The planet label fades out much sooner, at 250 AU.
         const labelOpacity = 1.0 - planetLabelFade;
-        if (p.label) p.label.element.style.opacity = isLocalPlanet ? labelOpacity : 0;
-        if (p.label) p.label.element.style.pointerEvents = (isLocalPlanet && labelOpacity > 0.5) ? 'auto' : 'none';
-    });
-
-    // Fade in/out the system-scale star meshes
-    starMeshes.forEach(mesh => {
-        const isLocalStar = starSystems[lastFocusedSystem]?.stars.some(s => s.name === mesh.mesh.name);
-        const opacity = isLocalStar ? solarSystemOpacity : 0;
-        mesh.mesh.material.opacity = opacity;
-        // Only show the system-scale label when not at interstellar/galactic scales
-        if (currentScale !== 'interstellar' && currentScale !== 'galactic') {
-            mesh.label.element.style.opacity = opacity;
+        if (p.label) {
+            // A pinned label should always be visible, otherwise use the calculated opacity.
+            const finalOpacity = pinnedObjects.has(p.planet.name) ? 1.0 : (isLocalPlanet ? labelOpacity : 0);
+            p.label.element.style.opacity = finalOpacity;
         }
-    });
-
-    // Fade in/out the system-scale star lights
-    starLights.forEach(light => {
-        const isLocalStar = starSystems[lastFocusedSystem]?.stars.some(s => light.position.equals(s.position));
-        light.visible = isLocalStar && solarSystemOpacity > 0.1;
+        if (p.label) p.label.element.style.pointerEvents = (isLocalPlanet && labelOpacity > 0.5) ? 'auto' : 'none';
     });
 
     // Fade in moon objects
     moons.forEach(m => {
         let moonOpacity = 0;
-        // Only show moons if we are at planet scale and focused on their parent planet
-        if (currentScale === 'planet' && focusedObject && m.mesh.parent && m.mesh.parent.name === focusedObject.name) {
-            moonOpacity = 1.0 - planetFade;
+        const isThisMoonFocused = focusedObject && focusedObject.name === m.mesh.name;
+        let shouldFadeLabel = true;
+
+        if (isThisMoonFocused) {
+            // If this specific moon is focused, force it to be fully visible, overriding other logic.
+            moonOpacity = 1.0;
+            shouldFadeLabel = false; // We will handle the label opacity manually.
+            if (m.label) m.label.element.style.opacity = 1.0;
+        } else {
+            // Standard visibility logic for unfocused moons.
+            const isFocusedOnParent = focusedObject && m.mesh.parent && focusedObject.name === m.mesh.parent.name;
+            if (currentScale === 'planet' && isFocusedOnParent) {
+                moonOpacity = 1.0 - planetFade;
+            }
         }
-        applyFade(m, moonOpacity);
+
+        // Pinned moon labels should always be visible.
+        const isPinned = pinnedObjects.has(m.mesh.name);
+        if (isPinned) shouldFadeLabel = false; // Prevent applyFade from touching a pinned label
+
+        applyFade(m, moonOpacity, false, shouldFadeLabel);
     });
+
+    // Fade the asteroid belt along with the Sol system
+    if (asteroidBelt) {
+        const isVisible = lastFocusedSystem === 'Sol' && solarSystemOpacity > 0.01 && showAsteroidsCheckbox.checked;
+        // Instead of toggling visibility, we update a uniform. This ensures the shader
+        // continues to run and update time, preventing lighting from breaking.
+        asteroidBeltUniforms.u_visibility.value = isVisible ? 1.0 : 0.0;
+    }
+
+    // Fade in/out the system-scale star meshes and their lights
+    starMeshes.forEach(mesh => {
+        const isLocalStar = starSystems[lastFocusedSystem]?.stars.some(s => s.name === mesh.name);
+        const opacity = isLocalStar ? solarSystemOpacity : 0;
+        mesh.material.opacity = opacity;
+        // Explicitly set the opacity for the system-scale star's label.
+        if (mesh.label && mesh.label.element && !pinnedObjects.has(mesh.name)) {
+            mesh.label.element.style.opacity = opacity;
+        }
+    });
+    starLights.forEach(light => {
+        const isLocalStar = starSystems[lastFocusedSystem]?.stars.some(s => light.position.equals(s.position));
+        light.visible = isLocalStar && solarSystemOpacity > 0.1;
+    });
+
 
     // Fade in stellar objects
-    const interstellarOpacity = systemFade * (1.0 - interstellarFade); // Fade in, then out
     stellarObjects.forEach(s => {
 
-        // At interstellar scale, hide individual star names and show the system name
-        if (currentScale === 'interstellar' || currentScale === 'galactic') {
-            if (s.label && s.label.element) {
-                s.label.element.style.opacity = 0; // Hide individual star label
-                s.label.element.style.pointerEvents = 'none';
+        // --- Handle Label Visibility for Interstellar Objects ---
+        if (s.label && s.label.element) {
+            const isMultiStarSystem = starSystems[s.system] && starSystems[s.system].stars.length > 1;
+            const isPinned = pinnedObjects.has(s.mesh.name);
+            let finalOpacity = 0; // Default to hidden
+
+            if (isInterstellarView) {
+                if (isMultiStarSystem) {
+                    // In interstellar view, multi-star systems use a system label, so hide individual ones.
+                    finalOpacity = 0;
+                } else {
+                    // For single-star systems, show the label.
+                    finalOpacity = interstellarOpacity;
+                }
             }
-        } else { // At system or planet scale, fade the label with the star
-            if (s.label && s.label.element) {
-                s.label.element.style.opacity = 0;
-                s.label.element.style.pointerEvents = 'none';
-            }
+
+            // A pinned label should always be visible, overriding other logic.
+            if (isPinned) finalOpacity = 1.0;
+
+            s.label.element.style.opacity = finalOpacity;
+            s.label.element.style.pointerEvents = finalOpacity > 0.5 ? 'auto' : 'none';
         }
-        s.mesh.material.opacity = interstellarOpacity; // Always fade the star mesh
+
+        const isLocalStarSprite = s.system === lastFocusedSystem;
+
+        if (isLocalStarSprite) {
+            // If this sprite belongs to the currently focused system, its visibility should be
+            // the inverse of the system-scale objects (fading out as system fades in),
+            // but it should ALSO fade out at the galactic scale.
+            s.mesh.material.opacity = (1.0 - solarSystemOpacity) * (1.0 - interstellarFade);
+        } else {
+            // For all other distant stars, fade them based on the interstellar scale.
+            s.mesh.material.opacity = systemFade * (1.0 - interstellarFade);
+        }
     });
 
-    // --- Z-Index Sorting for All Interstellar Labels ---
-    const isInterstellarView = currentScale === 'interstellar' || currentScale === 'galactic';
-    const allInterstellarLabels = [];
+    // --- Handle System Label Visibility ---
+    Object.values(systemLabels).forEach(label => {
+        const opacity = pinnedObjects.has(label.element.textContent) ? 1.0 : (isInterstellarView ? interstellarOpacity : 0);
+        label.element.style.opacity = opacity;
+        label.element.style.pointerEvents = (opacity > 0.5) ? 'auto' : 'none';
+        // The position and z-index are handled in the sorting logic below.
+    });
 
-    // Add multi-star system labels
-    Object.values(systemLabels).forEach(l => allInterstellarLabels.push({ element: l.element, position: l.position }));
+    // --- Z-Index Sorting for All Visible Labels ---
+    const visibleLabels = [];
 
-    // Add single-star system labels (from their sprites)
-    stellarObjects.forEach(s => {
-        // Only add labels for single-star systems to avoid duplication with systemLabels
-        if (s.label && !systemLabels[s.system]) {
-            allInterstellarLabels.push({ element: s.label.element, position: s.mesh.position });
+    // Collect all labels that should be visible and sortable
+    labels.forEach(label => {
+        // Only consider labels whose HTML element is currently visible (opacity > 0)
+        if (parseFloat(label.element.style.opacity) > 0.01) {
+            const worldPosition = new THREE.Vector3();
+            label.object.getWorldPosition(worldPosition);
+            visibleLabels.push({
+                element: label.element,
+                position: worldPosition,
+                distance: camera.position.distanceTo(worldPosition)
+            });
+        }
+    });
+    // Also collect system labels if they are visible
+    Object.values(systemLabels).forEach(label => {
+        if (parseFloat(label.element.style.opacity) > 0.01) {
+            visibleLabels.push({
+                element: label.element,
+                position: label.position, // System labels have a static world position
+                distance: camera.position.distanceTo(label.position)
+            });
         }
     });
 
     // Sort all labels by distance to camera for correct z-index stacking
-    const sortedLabels = allInterstellarLabels
-        .map(label => ({ ...label, distance: camera.position.distanceTo(label.position) }))
-        .sort((a, b) => b.distance - a.distance); // Farthest to closest
+    const sortedLabels = visibleLabels.sort((a, b) => b.distance - a.distance); // Farthest to closest
 
     sortedLabels.forEach((label, index) => {
-        const opacity = isInterstellarView ? interstellarOpacity : 0;
-        label.element.style.opacity = opacity;
-        label.element.style.pointerEvents = (opacity > 0.5) ? 'auto' : 'none';
         label.element.style.zIndex = index; // Closer labels get a higher z-index
         updateLabelPosition(label.element, label.position);
     });
 
-    starfield.material.opacity = interstellarOpacity;
-
-    // Fade in galactic object
-    galaxy.material.opacity = interstellarFade;
-
-    // Hide system-scale star labels when in interstellar view to prevent duplicates
-    if (isInterstellarView) {
-        starMeshes.forEach(sm => sm.label.element.style.opacity = 0);
-    }
-
     // Camera focusing logic
-    if (focusedObject) {
+    if (focusedObject && !cameraTransition.active) { // Don't run manual follow logic during a transition
         const targetPosition = new THREE.Vector3();
         focusedObject.getWorldPosition(targetPosition);
-        controls.target.lerp(targetPosition, 0.05);
+
+        if (focusedObject !== previousFocusedObject) {
+            console.log(`Focus changed. Current system is now: ${lastFocusedSystem}`);
+            previousFocusedObject = focusedObject;
+        }
+
+        // The desired distance is the current distance from the camera to the controls' target.
+        // This allows the user to zoom freely, and we just maintain that new distance as the object moves.
+        const currentDistance = camera.position.distanceTo(controls.target);
+        maintainCameraDistance(targetPosition, currentDistance);
 
         // Update the last focused system
-        const starData = starDatabase.find(s => s.name === focusedObject.name);
-        if (starData) {
-            lastFocusedSystem = starData.system;
-            lastFocusedStarPosition.copy(targetPosition);
+        const objectData = allPlanetData.find(p => p.name === focusedObject.name) || starDatabase.find(s => s.name === focusedObject.name);
+        if (objectData) {
+            lastFocusedSystem = objectData.system || objectData.star || 'Sol';
         } else if (focusedObject.name === 'Sol') {
             lastFocusedSystem = 'Sol';
-            lastFocusedStarPosition.copy(targetPosition);
         }
     }
+
+    // --- Final Opacity Updates for Large-Scale Objects ---
+    // The starfield should fade in at interstellar scale, but fade out completely
+
+    // Make the galaxy spin slowly
+    if (!isAnimationPaused) {
+        const galaxyRotationSpeed = 0.00005 * animationSpeed; // A very slow, majestic rotation
+        galaxy.rotation.y += galaxyRotationSpeed;
+        galaxyLabeled.rotation.y += galaxyRotationSpeed;
+        galaxyPointClouds.thinDisk.rotation.y += galaxyRotationSpeed;
+        galaxyPointClouds.thickDisk.rotation.y += galaxyRotationSpeed;
+        galaxyPointClouds.bulge.rotation.y += galaxyRotationSpeed;
+        // The halo is large and spherical, so rotation isn't as noticeable/necessary.
+    }
+
+    // Smoothly transition between labeled and unlabeled galaxy maps
+    const galaxyLabelOpacity = THREE.MathUtils.lerp(galaxyLabeled.material.opacity, showGalaxyDiagramCheckbox.checked ? 1.0 : 0.0, 0.05);
+    galaxy.material.opacity = interstellarFade * (1.0 - galaxyLabelOpacity);
+    galaxyLabeled.material.opacity = interstellarFade * galaxyLabelOpacity;
+
+    // Fade in the volumetric galaxy point clouds at the galactic scale
+    const galacticOpacity = THREE.MathUtils.smoothstep(distanceInAU, SCALES.INTERSTELLAR_TO_GALACTIC * 0.5, SCALES.INTERSTELLAR_TO_GALACTIC * 2.0);
+    galaxyPointClouds.thinDisk.material.opacity = galacticOpacity;
+    galaxyPointClouds.thickDisk.material.opacity = galacticOpacity * 0.7;
+    galaxyPointClouds.bulge.material.opacity = galacticOpacity;
+    galaxyPointClouds.halo.material.opacity = galacticOpacity * 0.3; // Halo is even fainter
+
+
 
     // Required if controls.enableDamping is true
     controls.update();
 
     // Render the scene from the perspective of the camera
     renderer.render(scene, camera);
+}
+
+/**
+ * Smoothly follows a target object while maintaining a fixed distance.
+ * @param {THREE.Vector3} targetPosition - The world position of the object to follow.
+ * @param {number} distance - The distance to maintain from the object.
+ */
+function maintainCameraDistance(targetPosition, distance) {
+    // If the "Lock Camera" checkbox is checked, also lock the camera's position
+    // relative to the target, making the object appear stationary on screen.
+    if (lockCameraCheckbox.checked) {
+        // For a rigid lock, instantly snap both the target and the camera position.
+        controls.target.copy(targetPosition);
+
+        // Calculate the ideal camera position based on the locked target
+        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+        offset.setLength(distance); // Use the provided stable distance
+        const newCameraPosition = new THREE.Vector3().addVectors(controls.target, offset);
+
+        camera.position.copy(newCameraPosition);
+    } else {
+        // If not locked, the target should follow the object.
+        // A lerp is used here to smooth out any jitter from the object's own movement,
+        // but the main focus transition is handled by the cameraTransition logic.
+        const followLerpFactor = cameraTransition.active ? 1.0 : 0.1;
+        controls.target.lerp(targetPosition, followLerpFactor);
+    }
 }
 
 // 7. Resize Handler
@@ -1372,4 +1922,55 @@ window.addEventListener('resize', () => {
 });
 
 // Start the animation loop
-animate();
+async function main() {
+    const loadingManager = new THREE.LoadingManager();
+    const loader = new THREE.TextureLoader(loadingManager);
+
+    const texturePaths = {
+        sun: 'textures/stars/2k_sun.png',
+        sun_blue: 'textures/stars/2k_sun_blue.png',
+        sun_orange: 'textures/stars/2k_sun_orange.png',
+        sun_red: 'textures/stars/2k_sun_red.png',
+        sun_white: 'textures/stars/2k_sun_white.png',
+        mercury: 'textures/planets/2k_mercury.jpg',
+        venusSurface: 'textures/planets/2k_venus_surface.jpg',
+        venusAtmos: 'textures/planets/2k_venus_atmosphere.jpg',
+        earth: 'textures/planets/2k_earth.jpg',
+        mars: 'textures/planets/2k_mars.jpg',
+        jupiter: 'textures/planets/2k_jupiter.jpg',
+        saturn: 'textures/planets/2k_saturn.jpg',
+        uranus: 'textures/planets/2k_uranus.jpg',
+        moon: 'textures/moons/2k_moon.jpg',
+        neptune: 'textures/planets/2k_neptune.jpg',
+        saturnRing: 'textures/planets/2k_saturn_ring_alpha.png',
+        flare0: "textures/lensflare/stellar_starview.png",
+        flare3: "textures/lensflare/stellar_starview.png",
+        star: 'textures/lensflare/stellar_starview.png',
+        star_blue: 'textures/lensflare/stellar_starview_blue.png',
+        galaxy: 'textures/galaxies/milkyway.png',
+        galaxy_labeled: 'textures/galaxies/milkyway_labeled.png',
+    };
+
+    const miscTexturePaths = {
+        asteroid: 'textures/misc/asteroid.jpg'
+    };
+
+    // Load all textures asynchronously
+    const texturePromises = Object.entries(texturePaths).map(([key, path]) => loader.loadAsync(path).then(texture => [key, texture]));
+    const miscTexturePromises = Object.entries(miscTexturePaths).map(([key, path]) => loader.loadAsync(path).then(texture => [key, texture]));
+
+    planetTextures = Object.fromEntries(await Promise.all(texturePromises));
+    miscTextures = Object.fromEntries(await Promise.all(miscTexturePromises));
+
+    // --- Scene Initialization (now that textures are loaded) ---
+    createStarSystem(solSystemData);
+    Object.values(allSystems).forEach(createStarSystem);
+    asteroidBelt = createAsteroidBelt();
+    galaxyPointClouds = createVolumetricGalaxy();
+    ({ galaxy, galaxyLabeled } = createGalaxyMeshes());
+
+    // Start the animation loop
+    animate();
+}
+
+main();

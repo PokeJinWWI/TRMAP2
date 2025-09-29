@@ -25,9 +25,31 @@
             left: 10px;
             background: rgba(0, 0, 0, 0.5);
             padding: 10px;
+            border: 1px solid #555;
             border-radius: 5px;
+            border-top-left-radius: 0;
+            border-bottom-left-radius: 0;
             color: white;
-            min-width: 120px;
+            width: 280px;
+            transition: transform 0.3s ease-in-out;
+            z-index: 10;
+        }
+        #ui-container.collapsed {
+            transform: translateX(calc(-100% - 10px));
+        }
+        #ui-toggle-button {
+            position: absolute;
+            top: -1px; /* Align with border */
+            right: -26px; /* Position it just outside the new border */
+            width: 25px;
+            height: 40px;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid #555;
+            border-left: none;
+            color: white;
+            cursor: pointer;
+            border-radius: 0 5px 5px 0;
+            padding: 0;
         }
         #distance-counter {
             position: absolute;
@@ -44,17 +66,6 @@
             background: rgba(0,0,0,0.5);
             padding: 5px 10px;
             border-radius: 3px;
-        }
-        #auto-zoom-indicator {
-            position: absolute;
-            bottom: 45px; /* Positioned above the credits button */
-            right: 10px;
-            background: rgba(100, 200, 255, 0.7);
-            color: black;
-            padding: 5px 10px;
-            border-radius: 3px;
-            display: none; /* Hidden by default */
-            font-size: 12px;
         }
         #credits-button {
             position: absolute;
@@ -76,11 +87,17 @@
             display: none; /* Hidden by default */
         }
         #info-name {
-            font-size: 1.2em;
+            font-size: 1.1em;
             font-weight: bold;
-            margin-bottom: 10px;
+        }
+        #info-name-wrapper {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             border-bottom: 1px solid #555;
-            padding-bottom: 5px;
+        }
+        #info-controls {
+            align-items: center;
         }
         #labels-container {
             position: absolute;
@@ -102,6 +119,40 @@
             cursor: pointer;
             /* The transform is now handled dynamically in JavaScript */
         }
+        #pinned-items-dropdown {
+            position: relative;
+            margin-top: 10px;
+            display: none; /* Hidden by default */
+        }
+        #pinned-items-list {
+            position: absolute; top: 100%; left: 0; right: 0; background: rgba(0,0,0,0.8); border: 1px solid #555; border-top: none; border-radius: 0 0 3px 3px; max-height: 200px; overflow-y: auto; display: none; z-index: 100;
+        }
+        .pinned-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 2px;
+            font-size: 12px;
+        }
+        .pinned-item span {
+            cursor: pointer;
+        }
+        .pinned-item span:hover {
+            text-decoration: underline;
+        }
+        .unpin-button {
+            background: none; border: 1px solid #888; color: #ccc; border-radius: 50%; width: 18px; height: 18px; line-height: 14px; text-align: center; cursor: pointer; padding: 0;
+        }
+        .ui-group {
+            border: 1px solid #444;
+            border-radius: 3px;
+            padding: 8px;
+            margin-top: 10px;
+        }
+        #ui-container > .ui-group:first-of-type {
+            margin-top: 0; /* Remove top margin from the first group */
+        }
+
         .ui-element {
             background: #333;
             border: 1px solid #555;
@@ -149,23 +200,31 @@
 </head>
 <body>
     <div id="ui-container">
-        <div>
-            <input type="checkbox" id="show-orbits-checkbox" checked>
-            <label for="show-orbits-checkbox">Show Orbits</label>
+        <button id="ui-toggle-button">&laquo;</button>
+        <div class="ui-group">
+            <div>
+                <input type="checkbox" id="show-orbits-checkbox" checked>
+                <label for="show-orbits-checkbox">Show Orbits</label>
+            </div>
+            <div>
+                <input type="checkbox" id="show-labels-checkbox" checked>
+                <label for="show-labels-checkbox">Show Labels</label>
+            </div>
+            <div>
+                <input type="checkbox" id="show-galaxy-diagram-checkbox">
+                <label for="show-galaxy-diagram-checkbox">Show Galaxy Diagram</label>
+            </div>
+            <div>
+                <input type="checkbox" id="show-asteroids-checkbox" checked>
+                <label for="show-asteroids-checkbox">Show Asteroid Belt</label>
+            </div>
+            <div>
+                <input type="checkbox" id="pause-animation-checkbox">
+                <label for="pause-animation-checkbox">Pause Animation</label>
+            </div>
         </div>
-        <div>
-            <input type="checkbox" id="show-labels-checkbox" checked>
-            <label for="show-labels-checkbox">Show Labels</label>
-        </div>
-        <div>
-            <input type="checkbox" id="show-asteroids-checkbox" checked>
-            <label for="show-asteroids-checkbox">Show Asteroid Belt</label>
-        </div>
-        <div>
-            <input type="checkbox" id="pause-animation-checkbox">
-            <label for="pause-animation-checkbox">Pause Animation</label>
-        </div>
-        <div style="margin-top: 10px;">
+
+        <div class="ui-group">
             <label for="search-input" style="vertical-align: middle;">Search:</label>
             <div id="search-wrapper" style="display: inline-block; position: relative; vertical-align: middle;">
                 <input type="text" id="search-input" class="ui-element" placeholder="E.g., Mars, Sirius" autocomplete="off">
@@ -186,19 +245,21 @@
                 }
             </style>
         </div>
-        <div style="margin-top: 10px;">
+        <div class="ui-group">
             <label style="vertical-align: middle;">Speed: </label>
             <button id="speed-down-btn" style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&larr;</button>
             <span id="speed-display" style="display:inline-block; width: 80px; text-align:center; vertical-align: middle;">Normal</span>
             <button id="speed-up-btn" style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&rarr;</button>
+        </div>
+        <div id="pinned-items-dropdown">
+            <button id="pinned-items-button" class="ui-element" style="width: 100%; text-align: left;"></button>
+            <div id="pinned-items-list"></div>
         </div>
     </div>
 
     <div id="scale-indicator">Scale: System</div>
 
     <div id="distance-counter">Distance: 0 km</div>
-
-    <div id="auto-zoom-indicator">Auto-Traveling...</div>
 
     <div id="credits-button">Credits</div>
 
@@ -207,15 +268,22 @@
             <h2>Credits</h2>
             <p><strong>Code</strong><br>Gemini AI, PokeJin</p>            
             <p><strong>Prompt/Context Engineering</strong><br>PokeJin, ChatGPT</p>
-            <p><strong>Concept</strong><br>Mr1noobfatfish, PokeJin</p>            
-            <p><strong>Textures:</strong><br>SolarSystemScope<br>cubicApoc</p>
+            <p><strong>Concept</strong><br>Mr1noobfatfish, PokeJin</p>
+            <p><strong>Textures:</strong><br>SolarSystemScope<br>TonyS(spacespheremaps)<br>NASA<br>GiveMeTheCheese1<br>cubicApoc</p>
             <button id="close-credits-button" class="ui-element">Close</button>
         </div>
     </div>
 
 
     <div id="info-box">
-        <div id="info-name"></div>
+        <div id="info-name-wrapper">
+            <div id="info-name"></div>
+            <div id="info-controls">
+                <input type="checkbox" id="lock-camera-checkbox" style="vertical-align: middle;">
+                <label for="lock-camera-checkbox" style="vertical-align: middle; font-size: 10px; margin-right: 8px;">Lock</label>
+                <button id="pin-button" class="ui-element" style="padding: 2px 6px; font-size: 10px; display: none;">Pin</button>
+            </div>
+        </div>
         <div id="info-details"></div>
     </div>
 
