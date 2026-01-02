@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,11 +15,21 @@
              * You will need to generate .woff and .woff2 files from your .ttf file.
              */
             src: url('fonts/conthrax.woff2') format('woff2'),
-                 url('fonts/conthrax.woff') format('woff'),
-                 url('fonts/conthrax.ttf') format('truetype');
+                url('fonts/conthrax.woff') format('woff'),
+                url('fonts/conthrax.ttf') format('truetype');
         }
-        body { margin: 0; font-family: 'Conthrax', sans-serif; background-color: #000; color: #fff; }
-        canvas { display: block; }
+
+        body {
+            margin: 0;
+            font-family: 'Conthrax', sans-serif;
+            background-color: #000;
+            color: #fff;
+        }
+
+        canvas {
+            display: block;
+        }
+
         #ui-container {
             position: absolute;
             top: 10px;
@@ -34,16 +45,20 @@
             transition: transform 0.3s ease-in-out;
             z-index: 10;
         }
+
         #ui-container.collapsed {
             transform: translateX(calc(-100% - 10px));
         }
+
         #ui-toggle-button {
             position: absolute;
-            top: -1px; /* Align with border */
-            right: -26px; /* Position it just outside the new border */
+            top: -1px;
+            /* Align with border */
+            right: -26px;
+            /* Position it just outside the new border */
             width: 25px;
             height: 40px;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             border: 1px solid #555;
             border-left: none;
             color: white;
@@ -51,63 +66,75 @@
             border-radius: 0 5px 5px 0;
             padding: 0;
         }
+
         #distance-counter {
             position: absolute;
             bottom: 10px;
             left: 10px;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             padding: 5px 10px;
             border-radius: 3px;
         }
+
         #scale-indicator {
             position: absolute;
-            bottom: 45px; /* Positioned above the distance counter */
+            bottom: 45px;
+            /* Positioned above the distance counter */
             left: 10px;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             padding: 5px 10px;
             border-radius: 3px;
         }
+
         #credits-button {
             position: absolute;
             bottom: 10px;
             right: 10px;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0, 0, 0, 0.5);
             padding: 5px 10px;
             border-radius: 3px;
             cursor: pointer;
         }
+
         #info-box {
             position: absolute;
             top: 10px;
             right: 10px;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0, 0, 0, 0.7);
             padding: 15px;
             border-radius: 5px;
             width: 250px;
-            display: none; /* Hidden by default */
+            display: none;
+            /* Hidden by default */
         }
+
         #info-name {
             font-size: 1.1em;
             font-weight: bold;
         }
+
         #info-name-wrapper {
             display: flex;
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid #555;
         }
+
         #info-controls {
             align-items: center;
         }
+
         #labels-container {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            pointer-events: none; /* So it doesn't interfere with mouse clicks on the canvas */
+            pointer-events: none;
+            /* So it doesn't interfere with mouse clicks on the canvas */
             overflow: hidden;
         }
+
         .label {
             position: absolute;
             color: white;
@@ -115,18 +142,34 @@
             padding: 2px 5px;
             border-radius: 3px;
             font-size: 12px;
-            pointer-events: auto; /* Allow clicks on individual labels */
+            pointer-events: auto;
+            /* Allow clicks on individual labels */
             cursor: pointer;
             /* The transform is now handled dynamically in JavaScript */
         }
+
         #pinned-items-dropdown {
             position: relative;
             margin-top: 10px;
-            display: none; /* Hidden by default */
+            display: none;
+            /* Hidden by default */
         }
+
         #pinned-items-list {
-            position: absolute; top: 100%; left: 0; right: 0; background: rgba(0,0,0,0.8); border: 1px solid #555; border-top: none; border-radius: 0 0 3px 3px; max-height: 200px; overflow-y: auto; display: none; z-index: 100;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid #555;
+            border-top: none;
+            border-radius: 0 0 3px 3px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+            z-index: 100;
         }
+
         .pinned-item {
             display: flex;
             justify-content: space-between;
@@ -134,23 +177,38 @@
             padding: 4px 2px;
             font-size: 12px;
         }
+
         .pinned-item span {
             cursor: pointer;
         }
+
         .pinned-item span:hover {
             text-decoration: underline;
         }
+
         .unpin-button {
-            background: none; border: 1px solid #888; color: #ccc; border-radius: 50%; width: 18px; height: 18px; line-height: 14px; text-align: center; cursor: pointer; padding: 0;
+            background: none;
+            border: 1px solid #888;
+            color: #ccc;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            line-height: 14px;
+            text-align: center;
+            cursor: pointer;
+            padding: 0;
         }
+
         .ui-group {
             border: 1px solid #444;
             border-radius: 3px;
             padding: 8px;
             margin-top: 10px;
         }
-        #ui-container > .ui-group:first-of-type {
-            margin-top: 0; /* Remove top margin from the first group */
+
+        #ui-container>.ui-group:first-of-type {
+            margin-top: 0;
+            /* Remove top margin from the first group */
         }
 
         .ui-element {
@@ -162,8 +220,18 @@
             font-family: 'Conthrax', sans-serif;
             vertical-align: middle;
         }
+
         /* Remove default arrow for select in some browsers */
-        select.ui-element { -webkit-appearance: none; -moz-appearance: none; appearance: none; padding-right: 20px; background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>"); background-repeat: no-repeat; background-position-x: 100%; background-position-y: 50%; }
+        select.ui-element {
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+            padding-right: 20px;
+            background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+            background-repeat: no-repeat;
+            background-position-x: 100%;
+            background-position-y: 50%;
+        }
 
         /* Credits Panel Styles */
         #credits-panel {
@@ -173,11 +241,14 @@
             width: 100%;
             height: 100%;
             background: rgba(0, 0, 0, 0.7);
-            display: none; /* Initially hidden, controlled by JS */
+            display: none;
+            /* Initially hidden, controlled by JS */
             justify-content: center;
             align-items: center;
-            z-index: 200; /* Ensure it's on top of other UI */
+            z-index: 200;
+            /* Ensure it's on top of other UI */
         }
+
         #credits-content {
             background: rgba(20, 20, 20, 0.9);
             padding: 20px 40px;
@@ -186,18 +257,25 @@
             text-align: center;
             color: white;
         }
+
         #credits-content h2 {
             margin-top: 0;
             border-bottom: 1px solid #555;
             padding-bottom: 10px;
         }
+
         #credits-content p {
             line-height: 1.5;
             margin: 15px 0;
         }
-        #close-credits-button { margin-top: 20px; cursor: pointer; }
+
+        #close-credits-button {
+            margin-top: 20px;
+            cursor: pointer;
+        }
     </style>
 </head>
+
 <body>
     <div id="ui-container">
         <button id="ui-toggle-button">&laquo;</button>
@@ -225,10 +303,22 @@
         </div>
 
         <div class="ui-group">
+            <div>
+                <input type="checkbox" id="show-cursor-checkbox">
+                <label for="show-cursor-checkbox">Show 3D Cursor</label>
+            </div>
+            <label for="cursor-step-slider" style="display: block; margin-top: 5px;">Move Step:</label>
+            <input type="range" id="cursor-step-slider" min="0.1" max="10" value="1" step="0.1" style="width: 100%;">
+
+        </div>
+
+        <div class="ui-group">
             <label for="search-input" style="vertical-align: middle;">Search:</label>
             <div id="search-wrapper" style="display: inline-block; position: relative; vertical-align: middle;">
-                <input type="text" id="search-input" class="ui-element" placeholder="E.g., Mars, Sirius" autocomplete="off">
-                <div id="suggestions-box" style="position: absolute; top: 100%; left: 0; right: 0; background: rgba(0,0,0,0.8); border: 1px solid #555; border-top: none; border-radius: 0 0 3px 3px; max-height: 200px; overflow-y: auto; display: none; z-index: 100;">
+                <input type="text" id="search-input" class="ui-element" placeholder="E.g., Mars, Sirius"
+                    autocomplete="off">
+                <div id="suggestions-box"
+                    style="position: absolute; top: 100%; left: 0; right: 0; background: rgba(0,0,0,0.8); border: 1px solid #555; border-top: none; border-radius: 0 0 3px 3px; max-height: 200px; overflow-y: auto; display: none; z-index: 100;">
                     <!-- Suggestions will be populated by JavaScript -->
                 </div>
             </div>
@@ -237,6 +327,8 @@
                 <option value="star">Stars</option>
                 <option value="planet">Planets</option>
                 <option value="moon">Moons</option>
+                <option value="cursor">Cursor</option>
+                <option value="coordinates">Coordinates</option>
             </select>
             <style>
                 /* Style dropdown options to match the theme. Note: Browser support for this is limited. */
@@ -247,9 +339,19 @@
         </div>
         <div class="ui-group">
             <label style="vertical-align: middle;">Speed: </label>
-            <button id="speed-down-btn" style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&larr;</button>
-            <span id="speed-display" style="display:inline-block; width: 80px; text-align:center; vertical-align: middle;">Normal</span>
-            <button id="speed-up-btn" style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&rarr;</button>
+            <button id="speed-down-btn"
+                style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&larr;</button>
+            <span id="speed-display"
+                style="display:inline-block; width: 80px; text-align:center; vertical-align: middle;">Normal</span>
+            <button id="speed-up-btn"
+                style="background:none; border:1px solid #555; color:white; cursor:pointer; font-size:1em; vertical-align: middle; border-radius: 3px;">&rarr;</button>
+        </div>
+        <div class="ui-group">
+            <label for="mode-select" style="vertical-align: middle;">Mode:</label>
+            <select id="mode-select" class="ui-element" style="width: 100px;">
+                <option value="realistic">Realistic</option>
+                <option value="strategic">Strategic</option>
+            </select>
         </div>
         <div id="pinned-items-dropdown">
             <button id="pinned-items-button" class="ui-element" style="width: 100%; text-align: left;"></button>
@@ -266,22 +368,35 @@
     <div id="credits-panel">
         <div id="credits-content">
             <h2>Credits</h2>
-            <p><strong>Code</strong><br>Gemini AI, PokeJin</p>            
+            <p><strong>Code</strong><br>Gemini AI, PokeJin</p>
             <p><strong>Prompt/Context Engineering</strong><br>PokeJin, ChatGPT</p>
             <p><strong>Concept</strong><br>Mr1noobfatfish, PokeJin</p>
-            <p><strong>Textures:</strong><br>SolarSystemScope<br>TonyS(spacespheremaps)<br>NASA<br>GiveMeTheCheese1<br>cubicApoc</p>
+            <p><strong>Textures:</strong><br>SolarSystemScope<br>TonyS(spacespheremaps)<br>NASA<br>GiveMeTheCheese1<br>cubicApoc
+            </p>
             <button id="close-credits-button" class="ui-element">Close</button>
         </div>
     </div>
 
+    <div id="cursor-coords-panel"
+        style="position: absolute; bottom: 10px; right: 10px; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 3px; display: none; font-size: 12px; width: 220px;">
+        <div id="reference-frame-label" style="font-size: 10px; color: #aaa; margin-bottom: 4px;">Ref: Galactic Core
+        </div>
+        <div style="border-top: 1px solid #444; margin-top: 4px; padding-top: 4px;">
+            <span style="color: #ff4444;">X:</span> <span id="cursor-coord-x">0.00</span><br>
+            <span style="color: #44ff44;">Y:</span> <span id="cursor-coord-y">0.00</span><br>
+            <span style="color: #4444ff;">Z:</span> <span id="cursor-coord-z">0.00</span>
+        </div>
+    </div>
 
     <div id="info-box">
         <div id="info-name-wrapper">
             <div id="info-name"></div>
             <div id="info-controls">
                 <input type="checkbox" id="lock-camera-checkbox" style="vertical-align: middle;">
-                <label for="lock-camera-checkbox" style="vertical-align: middle; font-size: 10px; margin-right: 8px;">Lock</label>
-                <button id="pin-button" class="ui-element" style="padding: 2px 6px; font-size: 10px; display: none;">Pin</button>
+                <label for="lock-camera-checkbox"
+                    style="vertical-align: middle; font-size: 10px; margin-right: 8px;">Lock</label>
+                <button id="pin-button" class="ui-element"
+                    style="padding: 2px 6px; font-size: 10px; display: none;">Pin</button>
             </div>
         </div>
         <div id="info-details"></div>
@@ -292,4 +407,5 @@
     <!-- The main script will create and append the canvas here -->
     <script type="module" src="scene-boilerplate.js"></script>
 </body>
+
 </html>
