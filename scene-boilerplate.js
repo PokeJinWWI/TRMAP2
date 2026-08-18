@@ -82,11 +82,15 @@ rgbeLoader.load(
 );
 
 // --- Sun, Lighting, and Lens Flare ---
-// For physically correct lighting, we use 'power' (in lumens) instead of 'intensity'.
-// The decay property of 2 is the physically correct inverse-square falloff.
+// Orbital distances here are compressed for visualization (sceneUnitsPerAU=35, not true scale),
+// so a "physically correct" inverse-square power calibrated for real AU distances wildly
+// overexposes the inner planets (Mercury/Venus end up hundreds of times over 1.0 pre-tonemap,
+// which ACES compresses toward flat white, wiping out texture color — the "washed out" look).
+// Power is tuned instead for a reasonable exposure range at these compressed distances, and decay
+// is relaxed from the physical 2.0 to 1.5 so outer planets don't go fully dark as a side effect.
 const sunLight = new THREE.PointLight(0xffffff, 1.0); // Intensity is now a multiplier for power
-sunLight.power = 4 * Math.PI * 100000; // A high power value to illuminate distant planets
-sunLight.decay = 2;
+sunLight.power = 4 * Math.PI * 2000;
+sunLight.decay = 1.5;
 sunLight.position.copy(solGalacticPosition);
 
 // Enable shadow casting for the sun's light
@@ -94,7 +98,7 @@ sunLight.castShadow = false; // Disabled to remove pixelated shadows
 scene.add(sunLight);
 
 // Add an ambient light to ensure planets are not completely black.
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.05); // Reduced for more dramatic shadows
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.15);
 scene.add(ambientLight);
 
 
@@ -473,11 +477,13 @@ function createStarSystem(systemData) {
         stellarObjects.push({ mesh: starSprite, label: starSpriteLabel, system: systemName });
 
         // --- Create the light source for the star ---
+        // Matches sunLight's calibration (see its declaration) for the same compressed-scale
+        // exposure reasons.
         const starLight = new THREE.PointLight(starData.color, 1.0);
-        const basePower = 4 * Math.PI * 100000;
+        const basePower = 4 * Math.PI * 2000;
         starLight.power = basePower * (starData.radius ** 2);
         starLight.name = starData.name; // Assign name to the light for easier lookup
-        starLight.decay = 2;
+        starLight.decay = 1.5;
         starLight.position.copy(starPosition);
         starLight.visible = false;
         scene.add(starLight);
@@ -1229,25 +1235,38 @@ pauseAnimationCheckbox.addEventListener('change', (e) => {
 const modeSelect = document.getElementById('mode-select');
 
 function setMode(mode) {
+    let envMapIntensity;
     if (mode === 'strategic') {
-        // Strategic Mode: Realistic scale, but "flat" lighting (high ambient)
-        // We keep the sun power normal but boost ambient massively to eliminate shadows/dark sides.
-        sunLight.power = 4 * Math.PI * 100000;
-        ambientLight.intensity = 2.0; // High ambient to make everything equally lit
+        // Strategic Mode: fully render textures without caring about lighting direction — zero
+        // out the sun's directional falloff and let a flat ambient carry all the illumination, so
+        // every texture reads at consistent brightness regardless of light direction (no dark
+        // sides). Also used as the low-cost fallback for the black hole (see showBlackHoleRaymarch
+        // in animate()), since the raymarcher is comparatively expensive.
+        sunLight.power = 0;
+        ambientLight.intensity = 1.3;
+        // scene.environment (the HDR skybox) also lights MeshStandardMaterial via image-based
+        // lighting, which is direction-dependent (the nebula is bright in one patch, black
+        // elsewhere) — without this, planets still showed a day/night terminator in "flat"
+        // lighting mode because the ambient light alone wasn't the only light source in play.
+        envMapIntensity = 0;
         planetScaleFactor = 0.1; // Same as realistic
     } else {
-        // Realistic Mode: Realistic sun, small planets, realistic lighting
-        sunLight.power = 4 * Math.PI * 100000;
-        ambientLight.intensity = 0.05;
+        // Realistic Mode: directional sun + subtle env reflections for depth.
+        sunLight.power = 4 * Math.PI * 2000;
+        ambientLight.intensity = 0.15;
+        envMapIntensity = 1;
         planetScaleFactor = 0.1;
     }
 
-    // Update all planet and moon scales
+    // Update all planet and moon scales and lighting response
     planets.forEach(p => {
         p.planet.traverse(child => {
             if (child.isMesh) {
                 const scaleRatio = planetScaleFactor / 0.1; // 0.1 is the base factor used in geometry creation
                 child.scale.setScalar(scaleRatio);
+                if (child.material && 'envMapIntensity' in child.material) {
+                    child.material.envMapIntensity = envMapIntensity;
+                }
             }
         });
     });
@@ -1256,6 +1275,9 @@ function setMode(mode) {
     moons.forEach(m => {
         const scaleRatio = planetScaleFactor / 0.1;
         m.mesh.scale.setScalar(scaleRatio);
+        if (m.mesh.material && 'envMapIntensity' in m.mesh.material) {
+            m.mesh.material.envMapIntensity = envMapIntensity;
+        }
     });
 }
 
@@ -1933,9 +1955,11 @@ function animate() {
             // This prevents being locked into the Sol system when focusing on other stars.
         } else if (currentScale === 'interstellar' && distanceInAU > SCALES.INTERSTELLAR_TO_GALACTIC) {
             currentScale = 'galactic';
-            const galacticViewDistLy = 100;
-            const galacticViewDistScene = galacticViewDistLy * sceneUnitsPerLy;
-            startAutoZoom(galacticViewDistScene, new THREE.Vector3(0, 0, 0)); // Zoom out towards galactic center
+            // Must land past SCALES.INTERSTELLAR_TO_GALACTIC (mirrors the 0.8x-under landing point
+            // used below for the reverse transition) — landing short of it, as a fixed "100 ly"
+            // previously did, immediately re-satisfies the galactic->interstellar condition below
+            // and bounces back every time, causing a permanent zoom-in/zoom-out oscillation.
+            startAutoZoom(SCALES.INTERSTELLAR_TO_GALACTIC * 1.3 * sceneUnitsPerAU, new THREE.Vector3(0, 0, 0)); // Zoom out towards galactic center
         } else if (currentScale === 'galactic' && distanceInAU < SCALES.INTERSTELLAR_TO_GALACTIC) {
             currentScale = 'interstellar';
             startAutoZoom(SCALES.INTERSTELLAR_TO_GALACTIC * 0.8 * sceneUnitsPerAU);
@@ -2062,7 +2086,7 @@ function animate() {
                         if (child.userData.uniforms.opacity) {
                             child.userData.uniforms.opacity.value = opacity;
                         }
-                        if (child.userData.uniforms.u_time) {
+                        if (child.userData.uniforms.u_time && !isAnimationPaused) {
                             child.userData.uniforms.u_time.value += 0.01 * animationSpeed;
                         }
                     }
@@ -2081,16 +2105,23 @@ function animate() {
     });
 
 
+    // Stars/systems farther than this from the currently focused system are considered a
+    // different stellar neighborhood, and their unpinned labels should stay hidden in
+    // interstellar view (e.g. Sol's neighbors shouldn't appear while out at Sagittarius A*).
+    const STELLAR_NEIGHBORHOOD_RADIUS = 50 * sceneUnitsPerLy;
+    const currentSystemCenter = starSystems[lastFocusedSystem]?.center;
+
     // Fade in stellar objects
     stellarObjects.forEach(s => {
         const isPinned = pinnedObjects.has(s.mesh.name);
+        const isInNeighborhood = !currentSystemCenter || s.mesh.position.distanceTo(currentSystemCenter) < STELLAR_NEIGHBORHOOD_RADIUS;
 
         // --- Handle Label Visibility for Interstellar Objects ---
         if (s.label && s.label.element) {
             const isMultiStarSystem = starSystems[s.system] && starSystems[s.system].stars.length > 1;
             let finalOpacity = 0; // Default to hidden
 
-            if (isInterstellarView) {
+            if (isInterstellarView && isInNeighborhood) {
                 // In interstellar view, only show labels for single-star systems.
                 // In galactic view, hide all unpinned star labels.
                 if (!isMultiStarSystem && currentScale !== 'galactic') finalOpacity = interstellarOpacity;
@@ -2128,9 +2159,10 @@ function animate() {
     // --- Handle System Label Visibility ---
     Object.values(systemLabels).forEach(label => {
         const isPinned = pinnedObjects.has(label.element.textContent);
+        const isInNeighborhood = !currentSystemCenter || label.position.distanceTo(currentSystemCenter) < STELLAR_NEIGHBORHOOD_RADIUS;
         let opacity = 0;
         // Only show system labels in interstellar view, not galactic view, unless pinned.
-        if (currentScale === 'interstellar' || isPinned) {
+        if ((currentScale === 'interstellar' && isInNeighborhood) || isPinned) {
             opacity = isPinned ? 1.0 : interstellarOpacity;
         }
         label.element.style.opacity = opacity;
@@ -2248,8 +2280,32 @@ function animate() {
     // Required if controls.enableDamping is true
     controls.update();
 
-    // Render the scene from the perspective of the camera
-    renderer.render(scene, camera);
+    // While looking at Sagittarius A* up close, swap the whole frame for the gravitational-lensing
+    // raymarcher instead of the normal scene render. Nothing else is visible at that focus anyway
+    // (see the fading logic above), so this is a clean full-screen replacement, not an overlay.
+    //
+    // The raymarcher only activates within RAYMARCH_MAX_DISTANCE of the hole. Its per-pixel step
+    // size has to stay small to keep the close-up lensing accurate (that's what makes the disk
+    // look right), which bounds how far it can reach within a fixed step budget — it physically
+    // cannot cover the full ~63,000 AU span of "system" scale without either ballooning the step
+    // count (too slow) or coarsening the near-field steps (visibly degrades the lensing we just
+    // tuned). So farther out, this falls through to the normal render, which still shows the old
+    // mesh-based black hole (event horizon + disk + photon ring) via ordinary perspective — that
+    // one has no such range limit, making it a natural middle LOD tier between the interstellar
+    // sprite and the close-up raymarcher instead of a hard pop from "small icon" to "nothing".
+    // Empirically tuned (not purely analytic — the step-budget math undersold how quickly the
+    // reach actually degrades): full quality out to ~40 AU, visibly thinning by ~55-70 AU, and
+    // failing outright (rays never reach the disk/horizon) by ~85-90 AU. Capping at 40 AU keeps
+    // the raymarcher always full-quality when it's on, rather than fading out as you approach it.
+    const RAYMARCH_MAX_DISTANCE = 40 * sceneUnitsPerAU;
+    const showBlackHoleRaymarch = blackHoleRaymarch && modeSelect.value !== 'strategic' && currentScale === 'system' && lastFocusedSystem === 'Sagittarius A*' && camera.position.length() < RAYMARCH_MAX_DISTANCE;
+    if (showBlackHoleRaymarch) {
+        updateBlackHoleRaymarchUniforms();
+        renderer.render(blackHoleRaymarch.scene, blackHoleRaymarch.camera);
+    } else {
+        // Render the scene from the perspective of the camera
+        renderer.render(scene, camera);
+    }
 }
 
 /**
@@ -2285,6 +2341,9 @@ window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    if (blackHoleRaymarch) {
+        blackHoleRaymarch.uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+    }
 });
 
 // Start the animation loop
@@ -2337,6 +2396,7 @@ async function main() {
     ({ galaxy, galaxyLabeled } = createGalaxyMeshes());
     ({ cursor: cursor3D } = create3DCursor());
     createBlackHole(); // Enabled per user request
+    blackHoleRaymarch = createBlackHoleRaymarcher();
 
     // Start the animation loop
     animate();
@@ -2428,6 +2488,47 @@ function createBlackHole() {
     );
     systemGroup.add(eventHorizon);
 
+    // --- Photon Ring / Light-Warping Glow ---
+    // A thin Fresnel-rim glow just outside the event horizon, approximating the way light
+    // bends around a black hole (the "photon ring"). It shimmers over time via u_time so the
+    // system view reads as alive rather than a static dot, even when the camera isn't moving.
+    const photonRingGeometry = new THREE.SphereGeometry(eventHorizonRadius * 1.12, 64, 64);
+    const photonRingUniforms = {
+        u_time: { value: 0.0 },
+        opacity: { value: 1.0 }
+    };
+    const photonRingMaterial = new THREE.ShaderMaterial({
+        uniforms: photonRingUniforms,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        vertexShader: `
+            varying vec3 vNormal;
+            varying vec3 vViewDir;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                vViewDir = normalize(-mvPosition.xyz);
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `,
+        fragmentShader: `
+            uniform float u_time;
+            uniform float opacity;
+            varying vec3 vNormal;
+            varying vec3 vViewDir;
+            void main() {
+                float fresnel = pow(1.0 - clamp(dot(vNormal, vViewDir), 0.0, 1.0), 3.0);
+                float shimmer = 0.85 + 0.15 * sin(u_time * 2.0 + fresnel * 6.0);
+                vec3 glowColor = vec3(1.0, 0.85, 0.55);
+                gl_FragColor = vec4(glowColor * fresnel * shimmer, fresnel * opacity);
+            }
+        `
+    });
+    const photonRing = new THREE.Mesh(photonRingGeometry, photonRingMaterial);
+    photonRing.userData.uniforms = photonRingUniforms;
+    systemGroup.add(photonRing);
+
     // Accretion Disk
     const diskInnerRadius = eventHorizonRadius * 2.0;
     const diskOuterRadius = eventHorizonRadius * 6.0;
@@ -2513,9 +2614,11 @@ function createBlackHole() {
             
             float turbulence = 0.5 + 0.5 * n;
             
-            // Create distinct rings using modulo/fract
+            // Create distinct rings using modulo/fract. The "rot" term (which already carries
+            // differential rotation via u_time) is folded in here so the ring pattern visibly
+            // spirals and spins over time instead of just jittering in place.
             float ringFrequency = 15.0; // Number of rings
-            float ringPattern = fract(radialPos * ringFrequency + turbulence * 0.1);
+            float ringPattern = fract(radialPos * ringFrequency + rot * 0.15 + turbulence * 0.1);
             
             // Sharp ring edges
             float ringSharpness = 0.3;
@@ -2677,7 +2780,10 @@ function createBlackHole() {
         depthWrite: false
     });
     const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.scale.setScalar(25 * sceneUnitsPerLy); // Reduced scale
+    // Sized on the same scale as regular star sprites (see starData.scale * 10 above) so that
+    // zooming between interstellar and system view reads as a level-of-detail swap, not a
+    // dive into an oversized icon.
+    sprite.scale.setScalar(55000 * 10);
     sprite.position.copy(systemGroup.position); // Match system position
     sprite.name = name;
     sprite.userData.scale = 'interstellar'; // Visible in interstellar view
@@ -2699,12 +2805,315 @@ function createBlackHole() {
     // Add to searchable objects (point to the sprite, focusing it will switch scales)
     searchableObjects.push({
         name: name,
-        type: 'star',
+        type: 'blackhole',
         object: sprite
     });
 
     systemGroup.position.set(0, 0, 0);
     return systemGroup;
+}
+
+/**
+ * Procedurally bakes an "unwrapped" accretion disk texture (angle 0-2pi on X,
+ * radial inner->outer on Y) for the raymarcher to sample. Baked once since the
+ * raymarcher itself animates rotation via its own time-based phi offset.
+ */
+function createDiskTexture() {
+    const width = 1024, height = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.createImageData(width, height);
+    const data = imageData.data;
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    for (let y = 0; y < height; y++) {
+        // With THREE's default flipY, shader v=1.0 (inner edge, r=DISK_IN) samples canvas row 0,
+        // and v=0.0 (outer edge) samples the last row — so canvas y=0 here is the hot inner edge.
+        const radialPos = y / (height - 1); // 0 = inner (hot), 1 = outer (cooler)
+
+        // The raymarcher derives opacity from this texture's own brightness (brighter = more
+        // opaque), so the disk must stay bright across nearly its whole span, only tapering right
+        // at the two edges — a steep falloff (like the old version's pow(1-r, 1.3), which dropped
+        // to near-black well before the outer edge) reads as "barely there" once alpha-derived.
+        const edgeFade = Math.min(1.0, (1.0 - radialPos) / 0.06) * Math.min(1.0, radialPos / 0.03);
+        const brightness = (1.0 - 0.3 * Math.pow(radialPos, 2.2)) * edgeFade;
+
+        for (let x = 0; x < width; x++) {
+            // Soft turbulent streaks instead of discrete rings — the earlier version's tight
+            // 15-band ring pattern created dark troughs between bands that read as a thin,
+            // jagged/"squiggly" pattern once alpha-derived from brightness. This uses non-periodic
+            // (random, then blurred) variation rather than sin(phi * N) waves — a periodic texture
+            // here beats against the extreme, non-linear screen-to-disk mapping near the photon
+            // ring (gravitational lensing), which produced a visible moiré/grid interference
+            // pattern. Non-periodic noise has no single frequency to beat against, so it doesn't.
+            const turbulence = 0.92 + (Math.random() - 0.5) * 0.16;
+
+            let r, g, b;
+            if (radialPos < 0.2) {
+                r = 1.8; g = 1.6; b = 1.35; // near-white hot inner edge
+            } else if (radialPos < 0.55) {
+                const t = (radialPos - 0.2) / 0.35;
+                r = lerp(1.6, 1.2, t); g = lerp(1.3, 0.75, t); b = lerp(1.0, 0.4, t);
+            } else {
+                const t = (radialPos - 0.55) / 0.45;
+                r = lerp(1.2, 0.7, t); g = lerp(0.75, 0.4, t); b = lerp(0.4, 0.2, t);
+            }
+
+            const shade = brightness * turbulence;
+            const idx = (y * width + x) * 4;
+            data[idx] = Math.min(255, r * shade * 190);
+            data[idx + 1] = Math.min(255, g * shade * 190);
+            data[idx + 2] = Math.min(255, b * shade * 190);
+            data[idx + 3] = 255;
+        }
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    // Blur away the per-pixel random noise so the disk reads as smooth glowing streaks rather
+    // than a grainy pattern.
+    ctx.filter = 'blur(5px)';
+    ctx.drawImage(canvas, 0, 0);
+    ctx.filter = 'none';
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping; // phi wraps around
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+let blackHoleRaymarch = null; // { scene, camera, uniforms } — set up in main() once textures are loaded.
+
+/**
+ * Builds a full-screen gravitational-lensing raymarcher for Sagittarius A*, adapted from
+ * https://celticspwn.github.io/CS184FinalProject/ (Verlet-integrated curved photon paths around
+ * a Schwarzschild black hole; disk-plane intersection; event-horizon cutoff). Unlike the original
+ * demo (which auto-orbits a fixed-radius dummy camera), this version derives the ray basis from
+ * the app's real OrbitControls camera each frame, and samples the app's own HDR skybox as the
+ * background starfield so it composites with the rest of the game's look.
+ *
+ * Only rendered in place of the normal scene while system-scale-focused on Sagittarius A* (see
+ * the render call in animate()), since a full-screen raymarch with ~140 steps/pixel is too
+ * expensive to run all the time.
+ */
+function createBlackHoleRaymarcher() {
+    const vertexShader = `
+        void main() {
+            gl_Position = vec4(position.xy, 0.0, 1.0);
+        }
+    `;
+
+    const fragmentShader = `
+        #define STEP_BASE 0.16
+        #define NSTEPS 140
+
+        uniform float u_time;
+        uniform vec2 u_resolution;
+        uniform vec3 u_camPos;
+        uniform vec3 u_camForward;
+        uniform vec3 u_camRight;
+        uniform vec3 u_camUp;
+        uniform float u_fov;
+        uniform vec3 u_camVel;
+        uniform sampler2D u_starTexture;
+        uniform sampler2D u_diskTexture;
+
+        const float PI = 3.141592653589793238462643383279;
+        const float DEG_TO_RAD = PI / 180.0;
+
+        const float MIN_TEMPERATURE = 1000.0;
+        const float TEMPERATURE_RANGE = 39000.0;
+
+        const float DISK_IN = 2.0;
+        const float DISK_WIDTH = 4.0;
+
+        vec3 temp_to_color(float temp_kelvin) {
+            vec3 color;
+            temp_kelvin = clamp(temp_kelvin, 1000.0, 40000.0) / 100.0;
+            if (temp_kelvin <= 66.0) {
+                color.r = 255.0;
+                color.g = log(temp_kelvin) * 99.4708025861 - 161.1195681661;
+            } else {
+                color.r = 329.698727446 * pow(max(temp_kelvin - 60.0, 0.0), -0.1332047592);
+                color.r = clamp(color.r, 0.0, 255.0);
+                color.g = 288.1221695283 * pow(max(temp_kelvin - 60.0, 0.0), -0.0755148492);
+            }
+            color.g = clamp(color.g, 0.0, 255.0);
+            if (temp_kelvin >= 66.0) {
+                color.b = 255.0;
+            } else if (temp_kelvin <= 19.0) {
+                color.b = 0.0;
+            } else {
+                color.b = 138.5177312231 * log(temp_kelvin - 10.0) - 305.0447927307;
+                color.b = clamp(color.b, 0.0, 255.0);
+            }
+            color /= 255.0;
+            return color;
+        }
+
+        // Special-relativistic aberration of the ray direction due to the camera's own velocity.
+        vec3 lorentz_transform_velocity(vec3 ray_v, vec3 cam_v) {
+            float speed = length(cam_v);
+            if (speed > 0.0) {
+                float dot_prod = dot(ray_v, cam_v);
+                float gamma = 1.0 / sqrt(max(1.0 - dot(cam_v, cam_v), 1e-4));
+                vec3 new_ray_v = (ray_v / gamma - cam_v + (gamma / (gamma + 1.0)) * dot_prod * cam_v) / max(1.0 - dot_prod, 1e-4);
+                return new_ray_v;
+            }
+            return ray_v;
+        }
+
+        vec2 cat_to_spherical(vec3 cartesian_coord) {
+            return vec2(atan(cartesian_coord.z, cartesian_coord.x), asin(clamp(cartesian_coord.y, -1.0, 1.0))) * vec2(1.0 / (2.0 * PI), 1.0 / PI) + 0.5;
+        }
+
+        void main() {
+            float uvfov = tan(u_fov / 2.0 * DEG_TO_RAD);
+            vec2 uv = (2.0 * gl_FragCoord.xy / u_resolution - 1.0) * vec2(u_resolution.x / u_resolution.y, 1.0);
+
+            vec3 forward = normalize(u_camForward);
+            vec3 right = normalize(u_camRight);
+            vec3 up = normalize(u_camUp);
+
+            vec3 pixel_pos = u_camPos + forward + right * uv.x * uvfov + up * uv.y * uvfov;
+            vec3 ray_dir = lorentz_transform_velocity(normalize(pixel_pos - u_camPos), u_camVel);
+            vec4 color = vec4(0.0, 0.0, 0.0, 1.0);
+
+            vec3 pos = u_camPos;
+            vec3 angular_vel = cross(pos, ray_dir);
+            float angular_speed2 = dot(angular_vel, angular_vel);
+
+            float ray_doppler_factor = (1.0 + dot(ray_dir, -u_camVel)) / sqrt(max(1.0 - dot(u_camVel, u_camVel), 1e-4));
+            float ray_intensity = 1.0 / ray_doppler_factor / ray_doppler_factor / ray_doppler_factor;
+
+            // Adaptive step, recomputed every iteration from the ray's *current* distance to the
+            // hole (not a single snapshot of the camera's starting distance). Far from the hole,
+            // curvature is negligible so we can safely take big steps to keep the disk/horizon
+            // reachable within NSTEPS at any zoom level; close in, steps shrink automatically for
+            // the fine resolution lensing needs. Because it tracks distance continuously, it can't
+            // suddenly jump as the camera moves, which was causing a visible "snap" while zooming.
+            float distance = length(pos);
+            float dStep = STEP_BASE * clamp(distance / 8.0, 1.0, 40.0);
+            vec3 old_pos = u_camPos - ray_dir * dStep;
+            float prevStep = dStep;
+
+            for (int i = 0; i < NSTEPS; i++) {
+                vec3 temp = pos;
+                float pos_dot = dot(pos, pos);
+                vec3 accel = -1.5 * angular_speed2 * pos / pos_dot / pos_dot / sqrt(pos_dot);
+                vec3 vel = (pos - old_pos) / prevStep;
+                float curStep = STEP_BASE * clamp(distance / 8.0, 1.0, 40.0);
+                pos += vel * curStep + accel * curStep * curStep;
+
+                if (distance < 1.0 && length(old_pos) > 1.0) { // crossed the event horizon
+                    color = vec4(0.0, 0.0, 0.0, 1.0);
+                    break;
+                }
+
+                if (old_pos.y * pos.y < 0.0) { // crossed the accretion disk's equatorial plane
+                    float lambda = -old_pos.y / vel.y;
+                    vec3 intersection = old_pos + lambda * vel;
+                    float r = length(intersection);
+                    if (DISK_IN <= r && r <= DISK_IN + DISK_WIDTH) {
+                        float phi = atan(intersection.x, intersection.z);
+                        vec3 disk_velocity = vec3(-intersection.x, 0.0, intersection.z) / sqrt(2.0 * (r - 1.0)) / (r * r);
+                        phi += u_time;
+                        phi = mod(phi, 2.0 * PI);
+                        float disk_gamma = 1.0 / sqrt(max(1.0 - dot(disk_velocity, disk_velocity), 1e-4));
+                        float disk_doppler_factor = disk_gamma * (1.0 + dot(ray_dir / distance, disk_velocity));
+
+                        vec2 tex_coord = vec2(mod(phi, 2.0 * PI) / (2.0 * PI), 1.0 - (r - DISK_IN) / DISK_WIDTH);
+                        vec4 disk_color = texture2D(u_diskTexture, tex_coord) / ray_doppler_factor / disk_doppler_factor;
+                        float disk_alpha = clamp(dot(disk_color, disk_color) / 2.5, 0.0, 1.0);
+                        disk_alpha /= disk_doppler_factor * disk_doppler_factor * disk_doppler_factor;
+                        color += vec4(disk_color) * disk_alpha;
+                    }
+                }
+                old_pos = temp;
+                prevStep = curStep;
+                distance = length(pos);
+            }
+
+            if (distance > 1.0) {
+                vec3 finalDir = normalize(pos);
+                vec2 tex_coord = cat_to_spherical(finalDir);
+                vec4 star_color = texture2D(u_starTexture, tex_coord);
+                color += star_color;
+            }
+
+            gl_FragColor = vec4(color.rgb * ray_intensity, 1.0);
+        }
+    `;
+
+    const uniforms = {
+        u_time: { value: 0.0 },
+        u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        u_camPos: { value: new THREE.Vector3() },
+        u_camForward: { value: new THREE.Vector3(0, 0, -1) },
+        u_camRight: { value: new THREE.Vector3(1, 0, 0) },
+        u_camUp: { value: new THREE.Vector3(0, 1, 0) },
+        u_fov: { value: 45.0 },
+        u_camVel: { value: new THREE.Vector3() },
+        u_starTexture: { value: null },
+        u_diskTexture: { value: createDiskTexture() }
+    };
+
+    const material = new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader,
+        fragmentShader,
+        depthTest: false,
+        depthWrite: false
+    });
+
+    const quadScene = new THREE.Scene();
+    const quadCamera = new THREE.Camera(); // Unused by the shader; a full-screen quad needs no real projection.
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+    quadScene.add(quad);
+
+    return { scene: quadScene, camera: quadCamera, uniforms };
+}
+
+/**
+ * Updates the raymarcher's uniforms from the real orbit camera each frame. Positions/velocities
+ * are expressed in units of the event horizon radius (30 scene units = 1.0), matching the
+ * physics constants (DISK_IN/DISK_WIDTH) ported from the reference shader.
+ */
+function updateBlackHoleRaymarchUniforms() {
+    const u = blackHoleRaymarch.uniforms;
+    const R = 30.0; // Must match eventHorizonRadius in createBlackHole().
+
+    const camPosNorm = camera.position.clone().divideScalar(R); // Sagittarius A* sits at the origin.
+    u.u_camPos.value.copy(camPosNorm);
+
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+    const up = new THREE.Vector3().crossVectors(right, forward).normalize();
+    u.u_camForward.value.copy(forward);
+    u.u_camRight.value.copy(right);
+    u.u_camUp.value.copy(up);
+
+    u.u_fov.value = camera.fov;
+    u.u_resolution.value.set(window.innerWidth, window.innerHeight);
+
+    if (!isAnimationPaused) {
+        u.u_time.value += 0.01 * animationSpeed;
+    }
+
+    // u_camVel intentionally stays at zero: an earlier version derived it from frame-to-frame
+    // camera motion to Doppler-tint the view based on the camera's own "velocity", but mouse-wheel
+    // zoom produces large per-frame position deltas that spiked it, causing a visible flash/bend
+    // while zooming that snapped away the instant the camera stopped. The disk's own orbital-motion
+    // Doppler beaming (driven by u_time, not camera movement) is unaffected and stays intact.
+
+    // The HDR skybox loads asynchronously and independently of the rest of scene setup, so pick
+    // it up here once it becomes available rather than requiring load-order coordination.
+    if (scene.background && u.u_starTexture.value !== scene.background) {
+        u.u_starTexture.value = scene.background;
+    }
 }
 
 main();
